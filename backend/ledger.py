@@ -161,6 +161,7 @@ class AuraLedger:
                         item["result"] = None
                 else:
                     item["result"] = None
+                item["is_new"] = False
                 return item
 
             self._conn.execute(
@@ -180,6 +181,7 @@ class AuraLedger:
             "error_message": None,
             "created_at": now,
             "updated_at": now,
+            "is_new": True,
         }
 
     def complete_execution_request(self, idempotency_key: str, result: dict) -> None:
