@@ -2,6 +2,7 @@ import logging
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -88,6 +89,54 @@ class MT5ExecutionEngine:
                 return df[["time", "open", "high", "low", "close"]], "MT5"
 
         return self._simulation_candles(symbol, n_bars), "SIMULATION"
+
+    def get_historical_candles(
+        self,
+        symbol: str,
+        timeframe: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[pd.DataFrame, str]:
+        if not self.connected or not MT5_AVAILABLE:
+            raise RuntimeError(
+                "A verified historical provider is not available. Connect MT5 or upload historical OHLC data."
+            )
+
+        timeframe_map = {
+            "M1": mt5.TIMEFRAME_M1,
+            "M5": mt5.TIMEFRAME_M5,
+            "M15": mt5.TIMEFRAME_M15,
+            "M30": mt5.TIMEFRAME_M30,
+            "H1": mt5.TIMEFRAME_H1,
+            "H4": mt5.TIMEFRAME_H4,
+            "D1": mt5.TIMEFRAME_D1,
+        }
+        resolved = timeframe_map.get(timeframe.upper())
+        if resolved is None:
+            raise ValueError(f"Unsupported MT5 timeframe: {timeframe}")
+
+        symbol = symbol.upper().strip()
+        if not mt5.symbol_select(symbol, True):
+            raise RuntimeError(f"Unable to select {symbol} in MetaTrader 5.")
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        else:
+            start = start.astimezone(timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        else:
+            end = end.astimezone(timezone.utc)
+        if end <= start:
+            raise ValueError("Historical end time must be after start time.")
+
+        rates = mt5.copy_rates_range(symbol, resolved, start, end)
+        if rates is None or len(rates) == 0:
+            raise RuntimeError(f"No MT5 historical candles are available for {symbol} in the requested range.")
+
+        df = pd.DataFrame(rates)
+        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+        return df[["time", "open", "high", "low", "close"]], "MT5_HISTORY"
 
     def market_status(self, symbol: str, df: pd.DataFrame | None = None, source: str | None = None) -> dict:
         symbol = symbol.upper().strip()

@@ -9,8 +9,17 @@ class InstitutionalConfluenceEngine:
         self.swing_window = swing_window
         self.min_gap = min_gap
 
-    def is_killzone_active(self) -> Dict[str, Any]:
-        now = datetime.now(timezone.utc)
+    def is_killzone_active(self, at: datetime | pd.Timestamp | None = None) -> Dict[str, Any]:
+        if at is None:
+            now = datetime.now(timezone.utc)
+        elif isinstance(at, pd.Timestamp):
+            now = at.to_pydatetime()
+        else:
+            now = at
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
         hour = now.hour + now.minute / 60.0
         london = 7.0 <= hour <= 10.0
         new_york = 13.0 <= hour <= 16.0
@@ -71,7 +80,10 @@ class InstitutionalConfluenceEngine:
         return sum(weight for key, weight in weights.items() if checklist.get(key))
 
     def find_high_probability_setup(self, df: pd.DataFrame, symbol: str) -> Dict[str, Any]:
-        killzone = self.is_killzone_active()
+        evaluation_time = None
+        if not df.empty and "time" in df.columns:
+            evaluation_time = pd.Timestamp(df.iloc[-1]["time"])
+        killzone = self.is_killzone_active(evaluation_time)
         if df.empty or len(df) < 30:
             return {
                 "symbol": symbol,

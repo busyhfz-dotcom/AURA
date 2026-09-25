@@ -40,6 +40,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { Language, translations } from '../locales/dictionary';
+import BacktestingView from './BacktestingView';
 import {
   AnalyticsView,
   AutoTradeView,
@@ -715,20 +716,6 @@ function MarketsView({ items, selectedSymbol, setSelectedSymbol, t }: { items: M
   );
 }
 
-function BacktestingView({ selectedMarket, t }: { selectedMarket?: MarketItem; t: any }) {
-  return (
-    <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] p-4 lg:p-5">
-      <div className="mx-auto max-w-[1100px]">
-        <h1 className="text-[18px] font-semibold text-white">{t.backtestingTitle}</h1>
-        <div className="aura-panel mt-4 rounded-lg p-3"><div className="grid gap-2 md:grid-cols-[1.2fr_.7fr_1.4fr_auto]"><div><div className="mb-1 text-[8px] text-[#71869b]">{t.strategy}</div><div className="aura-field flex items-center">{t.smcInstitutional}</div></div><div><div className="mb-1 text-[8px] text-[#71869b]">{t.timeframe}</div><div className="aura-field flex items-center">H1</div></div><div><div className="mb-1 text-[8px] text-[#71869b]">Date range</div><div className="aura-field flex items-center">Historical runner not connected</div></div><button className="aura-execute self-end rounded-md px-5 py-3 text-[10px] font-semibold" disabled>{t.runBacktest}</button></div></div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[[t.totalReturn,'—'],[t.winRate,'—'],[t.profitFactor,'—'],[t.totalTrades,'—']].map(([label,value]) => <div key={String(label)} className="aura-panel rounded-lg p-4"><div className="text-[8px] text-[#6f8499]">{label}</div><div className="mt-2 aura-mono text-[22px] text-[#2ae9bd]">{value}</div></div>)}</div>
-        <section className="aura-panel mt-3 rounded-lg p-4"><div className="flex items-center justify-between"><div><div className="text-[12px] font-semibold text-white">{t.demoAnalytics}</div><div className="mt-1 text-[9px] text-[#6f8499]">{t.demoAnalyticsNote}</div></div><span className="rounded bg-[#17334e] px-2 py-1 text-[8px] text-[#8eabc2]">UI READY</span></div><div className="mt-5 h-[220px] rounded-md border border-[#173047] bg-[#03101a] p-5"><TinySparkline values={selectedMarket?.sparkline || []} positive={(selectedMarket?.change_percent || 0) >= 0} /><div className="mt-8 border-t border-[#173047]" /></div></section>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[[t.maxDrawdown,'—'],[t.sharpeRatio,'—'],[t.avgRR,'—'],[t.expectancy,'—']].map(([label,value]) => <div key={String(label)} className="aura-panel rounded-lg p-4"><div className="text-[8px] text-[#6f8499]">{label}</div><div className="mt-2 aura-mono text-[16px] text-white">{value}</div></div>)}</div>
-      </div>
-    </main>
-  );
-}
-
 export default function TradingTerminal() {
   const [lang, setLang] = useState<Language>('en');
   const [view, setView] = useState<View>('terminal');
@@ -873,7 +860,7 @@ export default function TradingTerminal() {
         : view === 'analytics' ? <AnalyticsView t={t} />
         : view === 'news-guard' ? <NewsGuardView t={t} />
         : view === 'calendar' ? <CalendarView t={t} />
-        : view === 'backtesting' ? <BacktestingView selectedMarket={selectedMarket} t={t} />
+        : view === 'backtesting' ? <BacktestingView selectedSymbol={selectedSymbol} t={t} />
         : isMobile ? (
           <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} streamState={streamState} t={t} />
         ) : (

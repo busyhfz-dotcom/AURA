@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.5.0 — Verified historical backtesting
+
+### Backtest engine
+- Added walk-forward historical evaluation using the production confluence engine.
+- Killzones are evaluated from candle timestamps.
+- Entries require a future price touch; one position is modeled at a time.
+- Same-bar SL/TP ambiguity uses a conservative stop-first rule.
+- Fees and slippage are reported as not modeled.
+- Synthetic/simulation market data is excluded from performance backtests.
+
+### Historical sources & persistence
+- Added verified MT5 historical range retrieval.
+- Added uploaded OHLC JSON/CSV workflow through the terminal.
+- Added persistent backtest runs with results, equity curves and trade detail in SQLite.
+- Added backtest history/detail/capability APIs.
+
+### Terminal
+- Replaced placeholder Backtesting UI with historical source controls, risk settings, metrics, equity curve, trade table and persisted history.
+- Added complete English/Persian copy and server-enforced risk ceiling.
+
+### Validation
+- Added tests for historical killzone timing, conservative intrabar fills and backtest persistence.
+
 ## 3.4.0 — Data-backed product pages
 
 ### Product workspace

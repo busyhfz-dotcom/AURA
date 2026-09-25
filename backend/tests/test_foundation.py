@@ -4,6 +4,7 @@ import unittest
 
 import pandas as pd
 
+from backtesting import BacktestConfig, HistoricalBacktestEngine
 from config import Settings
 from engine.broker_engine import MT5ExecutionEngine
 from engine.institutional_confluence import InstitutionalConfluenceEngine
@@ -111,6 +112,76 @@ class AuraFoundationTests(unittest.TestCase):
             self.assertEqual(summary["losses"], 0)
             self.assertGreater(summary["net_realized"], 0)
             self.assertEqual(len(summary["equity_curve"]), 1)
+
+
+
+    def test_historical_killzone_uses_candle_time(self):
+        engine = InstitutionalConfluenceEngine()
+        london = engine.is_killzone_active(pd.Timestamp("2026-01-05T08:00:00Z"))
+        off_hours = engine.is_killzone_active(pd.Timestamp("2026-01-05T12:00:00Z"))
+        self.assertTrue(london["active"])
+        self.assertEqual(london["session"], "London Open")
+        self.assertFalse(off_hours["active"])
+
+    def test_backtest_uses_conservative_stop_first_intrabar_assumption(self):
+        class AlwaysSetup:
+            def find_high_probability_setup(self, df, symbol):
+                return {
+                    "status": "A_PLUS_SETUP",
+                    "action": "BUY",
+                    "entry": 1.0,
+                    "sl": 0.995,
+                    "tp": 1.015,
+                    "confluence_score": 100,
+                    "session": "Test",
+                }
+
+        dates = pd.date_range("2026-01-01T00:00:00Z", periods=100, freq="15min")
+        bars = pd.DataFrame({
+            "time": dates,
+            "open": [1.0] * 100,
+            "high": [1.02] * 100,
+            "low": [0.99] * 100,
+            "close": [1.0] * 100,
+        })
+        runner = HistoricalBacktestEngine(AlwaysSetup())
+        result = runner.run(
+            bars,
+            BacktestConfig(symbol="EURUSD", risk_percent=1.0, max_hold_bars=4, warmup_bars=60),
+            source="TEST_OHLC",
+        )
+        self.assertGreater(result["metrics"]["total_trades"], 0)
+        self.assertTrue(all(trade["exit_reason"] == "SL" for trade in result["trades"]))
+        self.assertLess(result["metrics"]["ending_balance"], result["metrics"]["initial_balance"])
+        self.assertEqual(result["assumptions"]["intrabar_both_levels"], "STOP_FIRST")
+
+    def test_backtest_run_is_persisted_and_retrievable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = AuraLedger(os.path.join(tmp, "aura.db"), 10_000)
+            result = {
+                "strategy": "AURA Institutional Confluence",
+                "strategy_version": "3.5",
+                "symbol": "EURUSD",
+                "timeframe": "M15",
+                "source": "USER_OHLC",
+                "bars": 100,
+                "from": "2026-01-01T00:00:00+00:00",
+                "to": "2026-01-02T00:45:00+00:00",
+                "assumptions": {},
+                "metrics": {
+                    "total_trades": 1,
+                    "total_return_percent": 1.0,
+                    "max_drawdown_percent": 0.0,
+                },
+                "equity_curve": [],
+                "trades": [],
+            }
+            run_id = ledger.record_backtest(result)
+            saved = ledger.backtest_run(run_id)
+            self.assertIsNotNone(saved)
+            self.assertEqual(saved["id"], run_id)
+            self.assertEqual(saved["source"], "USER_OHLC")
+            self.assertEqual(ledger.recent_backtests(5)[0]["id"], run_id)
 
 
 if __name__ == "__main__":
