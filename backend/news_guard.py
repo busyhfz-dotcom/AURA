@@ -100,6 +100,20 @@ class TradingEconomicsCalendar:
             raise RuntimeError("Trading Economics returned an unexpected calendar payload.")
         return payload
 
+    def cached_events(self, now: Optional[datetime] = None, days: int = 2) -> Optional[list[dict]]:
+        now = _utc(now or datetime.now(timezone.utc))
+        start = (now - timedelta(days=1)).date().isoformat()
+        end = (now + timedelta(days=max(1, min(days, 7)))).date().isoformat()
+        cache_key = (start, end)
+        with self._lock:
+            if (
+                self._cache_key == cache_key
+                and self._cache_at > 0
+                and time.monotonic() - self._cache_at < self.cache_seconds
+            ):
+                return list(self._cache)
+        return None
+
     @staticmethod
     def _normalize(item: dict) -> Optional[dict]:
         event_time = _parse_provider_date(item.get("Date"))
@@ -140,7 +154,7 @@ class TradingEconomicsCalendar:
         with self._lock:
             if (
                 self._cache_key == cache_key
-                and self._cache
+                and self._cache_at > 0
                 and time.monotonic() - self._cache_at < self.cache_seconds
             ):
                 return list(self._cache)
@@ -190,6 +204,7 @@ class NewsGuardService:
         symbol: Optional[str] = None,
         now: Optional[datetime] = None,
         include_events: bool = True,
+        refresh: bool = True,
     ) -> dict:
         now = _utc(now or datetime.now(timezone.utc))
         if not self.provider.configured:
@@ -207,8 +222,24 @@ class NewsGuardService:
                 "next_event": None,
             }
 
+        cached = self.provider.cached_events(now=now)
+        if not refresh and cached is None:
+            return {
+                "configured": True,
+                "healthy": None,
+                "active": False,
+                "blocking": False,
+                "provider": self.provider.provider_name,
+                "symbol": symbol,
+                "currencies": sorted(currencies_for_symbol(symbol or "")),
+                "message": "Economic calendar provider configured; live verification runs before execution.",
+                "events": [],
+                "active_events": [],
+                "next_event": None,
+            }
+
         try:
-            events = self.provider.fetch_events(now=now)
+            events = cached if cached is not None else self.provider.fetch_events(now=now)
         except Exception as exc:
             logger.error("Economic calendar unavailable: %s", exc)
             return {
