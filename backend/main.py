@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -16,6 +17,7 @@ from config import load_settings
 from engine.broker_engine import MT5ExecutionEngine
 from engine.institutional_confluence import InstitutionalConfluenceEngine
 from engine.market_filter import MarketFilter
+from execution_client import ExecutionWorkerClient
 from ledger import AuraLedger
 from news_calendar import EconomicCalendarService
 from risk_guard import RiskGuard
@@ -40,10 +42,16 @@ calendar_service = EconomicCalendarService(
     embargo_before_minutes=settings.news_embargo_before_minutes,
     embargo_after_minutes=settings.news_embargo_after_minutes,
 )
+execution_worker = ExecutionWorkerClient(
+    base_url=settings.execution_worker_url,
+    shared_secret=settings.execution_worker_secret,
+    timeout_seconds=settings.execution_worker_timeout_seconds,
+)
+_worker_health_cache: dict = {"at": 0.0, "payload": None}
 
 app = FastAPI(
     title="AURA Market Intelligence API",
-    version="3.6.0",
+    version="3.7.0",
     description="Market structure analytics, durable execution audit and guarded trading infrastructure for AURA Terminal.",
 )
 
@@ -73,6 +81,17 @@ class SizingRequest(BaseModel):
     risk_percent: float = Field(default=0.5, ge=0.1, le=2.0)
 
 
+class LiveCloseRequest(BaseModel):
+    ticket: int = Field(gt=0)
+    volume: float | None = Field(default=None, gt=0)
+
+
+class LiveModifyRequest(BaseModel):
+    ticket: int = Field(gt=0)
+    sl: float | None = Field(default=None, gt=0)
+    tp: float | None = Field(default=None, gt=0)
+
+
 class HistoricalBar(BaseModel):
     time: datetime
     open: float = Field(gt=0)
@@ -93,11 +112,61 @@ class BacktestRequest(BaseModel):
     max_hold_bars: int = Field(default=96, ge=1, le=500)
 
 
+def _worker_health(force: bool = False) -> dict:
+    if not execution_worker.configured:
+        return {
+            "status": "NOT_CONFIGURED",
+            "connected": False,
+            "provider": "MT5 Execution Worker",
+            "reason": "AURA_EXECUTION_WORKER_URL and AURA_EXECUTION_WORKER_SECRET are required.",
+        }
+    now = time.time()
+    cached = _worker_health_cache.get("payload")
+    if not force and cached and now - float(_worker_health_cache.get("at") or 0) < 5:
+        return cached
+    try:
+        payload = execution_worker.health()
+    except RuntimeError as exc:
+        payload = {
+            "status": "UNAVAILABLE",
+            "connected": False,
+            "provider": "MT5 Execution Worker",
+            "reason": str(exc),
+        }
+    _worker_health_cache["at"] = now
+    _worker_health_cache["payload"] = payload
+    return payload
+
+
+def _live_transport_health() -> dict:
+    if settings.live_execution_transport == "worker":
+        return _worker_health()
+    state = broker.state
+    return {
+        "status": "ONLINE" if state.connected else "UNAVAILABLE",
+        "connected": state.connected,
+        "provider": state.provider,
+        "reason": state.reason,
+        "transport": "direct_mt5",
+    }
+
+
+def _live_positions() -> list[dict]:
+    if settings.live_execution_transport == "worker":
+        if not execution_worker.configured:
+            raise RuntimeError("Isolated execution worker is not configured.")
+        return execution_worker.positions()
+    if settings.live_execution_transport == "direct_mt5":
+        return broker.live_positions()
+    raise RuntimeError(f"Unsupported live execution transport: {settings.live_execution_transport}")
+
+
 def capabilities() -> dict:
     news_guard = calendar_service.status(settings.default_symbol)
+    transport = _live_transport_health()
     live_ready = (
         settings.live_execution_enabled
-        and broker.connected
+        and bool(transport.get("connected"))
         and bool(settings.execution_api_key)
         and bool(news_guard.get("configured"))
         and bool(news_guard.get("safe"))
@@ -109,10 +178,15 @@ def capabilities() -> dict:
         "news_guard": news_guard["configured"],
         "position_ledger": True,
         "risk_guard": True,
+        "idempotent_execution": True,
+        "execution_transport": settings.live_execution_transport,
+        "isolated_worker": settings.live_execution_transport == "worker",
     }
 
 
 def broker_payload() -> dict:
+    if settings.execution_mode == "live":
+        return _live_transport_health()
     state = broker.state
     return {
         "connected": state.connected,
@@ -165,7 +239,7 @@ async def startup_event():
     ledger.add_audit(
         "system.start",
         "AURA API started.",
-        metadata={"version": "3.6.0", "execution_mode": settings.execution_mode},
+        metadata={"version": "3.7.0", "execution_mode": settings.execution_mode},
     )
 
 
@@ -174,7 +248,7 @@ async def health_check():
     news_guard = calendar_service.status(settings.default_symbol)
     return {
         "status": "ONLINE",
-        "engine_version": "3.6.0",
+        "engine_version": "3.7.0",
         "execution_mode": settings.execution_mode.upper(),
         "max_risk_percent": settings.max_risk_percent,
         "broker": broker_payload(),
@@ -553,7 +627,7 @@ async def websocket_signals(websocket: WebSocket):
             analysis = engine.find_high_probability_setup(df, symbol)
             payload = {
                 "timestamp": int(time.time()),
-                "engine_version": "3.6.0",
+                "engine_version": "3.7.0",
                 "market_data_source": source,
                 "market_status": broker.market_status(symbol, df=df, source=source),
                 "execution_mode": settings.execution_mode.upper(),
