@@ -86,10 +86,28 @@ class AuraLedger:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS backtest_runs (
+                    id TEXT PRIMARY KEY,
+                    strategy TEXT NOT NULL,
+                    strategy_version TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    bars INTEGER NOT NULL,
+                    period_from TEXT NOT NULL,
+                    period_to TEXT NOT NULL,
+                    total_trades INTEGER NOT NULL,
+                    total_return_percent REAL,
+                    max_drawdown_percent REAL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
                 CREATE INDEX IF NOT EXISTS idx_positions_opened_at ON positions(opened_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_events(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_backtests_created_at ON backtest_runs(created_at DESC);
                 """
             )
             row = self._conn.execute("SELECT id FROM account_state WHERE id = 1").fetchone()
@@ -306,6 +324,78 @@ class AuraLedger:
             "max_drawdown_percent": round(max_drawdown_percent, 2) if total else None,
             "equity_curve": equity_curve,
         }
+
+    def record_backtest(self, result: dict) -> str:
+        run_id = f"BT-{uuid.uuid4().hex[:12].upper()}"
+        created_at = utc_now_iso()
+        metrics = result.get("metrics") or {}
+        payload = {**result, "id": run_id, "created_at": created_at}
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO backtest_runs (
+                    id, strategy, strategy_version, symbol, timeframe, source, bars,
+                    period_from, period_to, total_trades, total_return_percent,
+                    max_drawdown_percent, result_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    result["strategy"],
+                    result["strategy_version"],
+                    result["symbol"],
+                    result["timeframe"],
+                    result["source"],
+                    int(result["bars"]),
+                    result["from"],
+                    result["to"],
+                    int(metrics.get("total_trades") or 0),
+                    metrics.get("total_return_percent"),
+                    metrics.get("max_drawdown_percent"),
+                    json.dumps(payload),
+                    created_at,
+                ),
+            )
+        self.add_audit(
+            "backtest.completed",
+            f"Backtest {run_id} completed for {result['symbol']} {result['timeframe']}.",
+            metadata={
+                "run_id": run_id,
+                "source": result["source"],
+                "bars": result["bars"],
+                "total_trades": metrics.get("total_trades", 0),
+            },
+        )
+        return run_id
+
+    def recent_backtests(self, limit: int = 20) -> list[dict]:
+        limit = max(1, min(int(limit), 100))
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, strategy, strategy_version, symbol, timeframe, source, bars,
+                       period_from, period_to, total_trades, total_return_percent,
+                       max_drawdown_percent, created_at
+                FROM backtest_runs
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def backtest_run(self, run_id: str) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT result_json FROM backtest_runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(row["result_json"])
+        except json.JSONDecodeError:
+            return None
 
     def recent_audit(self, limit: int = 30) -> list[dict]:
         limit = max(1, min(int(limit), 100))
