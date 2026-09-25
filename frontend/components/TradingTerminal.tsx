@@ -40,8 +40,17 @@ import {
   Zap,
 } from 'lucide-react';
 import { Language, translations } from '../locales/dictionary';
+import {
+  AnalyticsView,
+  AutoTradeView,
+  CalendarView,
+  OrdersView,
+  PerformanceView,
+  PositionsView,
+  SignalsView,
+} from './ProductViews';
 
-type View = 'terminal' | 'markets' | 'backtesting';
+type View = 'terminal' | 'markets' | 'signals' | 'auto-trade' | 'positions' | 'orders' | 'performance' | 'backtesting' | 'analytics' | 'calendar';
 type StreamState = 'connected' | 'reconnecting' | 'offline';
 
 type Candle = {
@@ -428,15 +437,15 @@ function Sidebar({ view, setView, lang, setLang, t }: { view: View; setView: (vi
   const nav = [
     [t.terminal, CandlestickChart, 'terminal'],
     [t.markets, BarChart3, 'markets'],
-    [t.signals, Activity, 'terminal'],
-    [t.autoTrade, Bot, 'terminal'],
-    [t.positions, WalletCards, 'terminal'],
-    [t.orders, ListOrdered, 'terminal'],
-    [t.performance, TrendingUp, 'terminal'],
+    [t.signals, Activity, 'signals'],
+    [t.autoTrade, Bot, 'auto-trade'],
+    [t.positions, WalletCards, 'positions'],
+    [t.orders, ListOrdered, 'orders'],
+    [t.performance, TrendingUp, 'performance'],
     [t.backtesting, LineChart, 'backtesting'],
-    [t.newsGuard, ShieldCheck, 'terminal'],
-    [t.analytics, Gauge, 'terminal'],
-    [t.calendar, CalendarDays, 'terminal'],
+    [t.newsGuard, ShieldCheck, 'calendar'],
+    [t.analytics, Gauge, 'analytics'],
+    [t.calendar, CalendarDays, 'calendar'],
   ] as const;
   return (
     <aside className="aura-sidebar-bg hidden h-full w-[196px] shrink-0 border-r border-[#153047]/65 xl:flex xl:flex-col rtl:border-l rtl:border-r-0">
@@ -447,7 +456,7 @@ function Sidebar({ view, setView, lang, setLang, t }: { view: View; setView: (vi
       <nav className="aura-thin-scroll flex-1 overflow-y-auto px-3 py-4">
         <div className="space-y-1">
           {nav.map(([label, Icon, target], index) => {
-            const active = (view === 'terminal' && index === 0) || (target !== 'terminal' && target === view);
+            const active = target === view || (target === 'calendar' && view === 'calendar' && index === 8);
             return (
               <button key={`${label}-${index}`} onClick={() => setView(target)} className={`aura-nav-item ${active ? 'is-active' : ''}`}>
                 <Icon className="h-[15px] w-[15px] shrink-0" />
@@ -854,7 +863,16 @@ export default function TradingTerminal() {
         <TopBar runtime={runtime} portfolio={portfolio} lang={lang} setLang={setLang} t={t} />
         <WatchlistStrip items={markets} selectedSymbol={selectedSymbol} setSelectedSymbol={(s) => { setSelectedSymbol(s); setView('terminal'); }} />
 
-        {view === 'markets' ? <MarketsView items={markets} selectedSymbol={selectedSymbol} setSelectedSymbol={(s) => { setSelectedSymbol(s); setView('terminal'); }} t={t} /> : view === 'backtesting' ? <BacktestingView selectedMarket={selectedMarket} t={t} /> : isMobile ? (
+        {view === 'markets' ? <MarketsView items={markets} selectedSymbol={selectedSymbol} setSelectedSymbol={(s) => { setSelectedSymbol(s); setView('terminal'); }} t={t} />
+        : view === 'signals' ? <SignalsView t={t} onOpenSymbol={(symbol) => { setSelectedSymbol(symbol); setView('terminal'); }} />
+        : view === 'auto-trade' ? <AutoTradeView t={t} />
+        : view === 'positions' ? <PositionsView t={t} />
+        : view === 'orders' ? <OrdersView t={t} />
+        : view === 'performance' ? <PerformanceView t={t} />
+        : view === 'analytics' ? <AnalyticsView t={t} />
+        : view === 'calendar' ? <CalendarView t={t} />
+        : view === 'backtesting' ? <BacktestingView selectedMarket={selectedMarket} t={t} />
+        : isMobile ? (
           <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} streamState={streamState} t={t} />
         ) : (
           <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] p-2 pb-20 md:p-2.5 xl:pb-2.5">
@@ -875,7 +893,7 @@ export default function TradingTerminal() {
         )}
 
         <nav className="aura-mobile-bottom fixed bottom-0 left-0 right-0 z-40 grid grid-cols-4 border-t border-[#173047] px-3 pt-2 xl:hidden">
-          {[[t.terminal,CandlestickChart,'terminal'],[t.markets,BarChart3,'markets'],[t.signals,Activity,'terminal'],[t.positions,WalletCards,'terminal']].map(([label, Icon, target], i) => <button key={`${label}-${i}`} onClick={() => setView(target as View)} className={`flex flex-col items-center gap-1 py-1 text-[8px] ${view === target && i < 2 ? 'text-[#2ae9bd]' : 'text-[#6f8498]'}`}><Icon className="h-4 w-4" /><span>{label as string}</span></button>)}
+          {[[t.terminal,CandlestickChart,'terminal'],[t.markets,BarChart3,'markets'],[t.signals,Activity,'signals'],[t.positions,WalletCards,'positions']].map(([label, Icon, target], i) => <button key={`${label}-${i}`} onClick={() => setView(target as View)} className={`flex flex-col items-center gap-1 py-1 text-[8px] ${view === target ? 'text-[#2ae9bd]' : 'text-[#6f8498]'}`}><Icon className="h-4 w-4" /><span>{label as string}</span></button>)}
         </nav>
       </div>
 
