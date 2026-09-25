@@ -48,6 +48,14 @@ execution_worker = ExecutionWorkerClient(
     timeout_seconds=settings.execution_worker_timeout_seconds,
 )
 _worker_health_cache: dict = {"at": 0.0, "payload": None}
+_autopilot_heartbeat: dict = {
+    "last_seen": 0.0,
+    "worker_id": None,
+    "version": None,
+    "enabled": False,
+    "symbols": [],
+    "last_action": None,
+}
 
 app = FastAPI(
     title="AURA Market Intelligence API",
@@ -79,6 +87,14 @@ class SizingRequest(BaseModel):
     entry: float = Field(gt=0)
     sl: float = Field(gt=0)
     risk_percent: float = Field(default=0.5, ge=0.1, le=2.0)
+
+
+class AutoPilotHeartbeat(BaseModel):
+    worker_id: str = Field(min_length=3, max_length=128)
+    version: str = Field(min_length=1, max_length=32)
+    enabled: bool
+    symbols: list[str] = Field(default_factory=list, max_length=64)
+    last_action: str | None = Field(default=None, max_length=256)
 
 
 class LiveCloseRequest(BaseModel):
@@ -395,13 +411,45 @@ async def calendar(symbol: str | None = None, hours: int = 48):
     }
 
 
+@app.post("/api/autopilot/heartbeat")
+async def autopilot_heartbeat(
+    heartbeat: AutoPilotHeartbeat,
+    x_aura_autopilot_secret: str | None = Header(default=None),
+):
+    if not settings.autopilot_shared_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Auto-Pilot heartbeat secret is not configured.",
+        )
+    if x_aura_autopilot_secret != settings.autopilot_shared_secret:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Auto-Pilot heartbeat secret.")
+    _autopilot_heartbeat.update({
+        "last_seen": time.time(),
+        "worker_id": heartbeat.worker_id,
+        "version": heartbeat.version,
+        "enabled": heartbeat.enabled,
+        "symbols": [symbol.upper().strip() for symbol in heartbeat.symbols if symbol.strip()],
+        "last_action": heartbeat.last_action,
+    })
+    return {"accepted": True, "server_time": int(time.time())}
+
+
 @app.get("/api/auto-trade")
 async def auto_trade_status():
     news_guard = calendar_service.status(settings.default_symbol)
+    transport = _live_transport_health()
+    heartbeat_age = time.time() - float(_autopilot_heartbeat.get("last_seen") or 0)
+    worker_online = (
+        bool(settings.autopilot_shared_secret)
+        and bool(_autopilot_heartbeat.get("last_seen"))
+        and heartbeat_age <= settings.autopilot_heartbeat_ttl_seconds
+    )
     blockers = []
     if settings.execution_mode != "live":
         blockers.append("LIVE_MODE_REQUIRED")
-    if not broker.connected:
+    if settings.live_execution_transport != "worker":
+        blockers.append("ISOLATED_WORKER_REQUIRED")
+    if not transport.get("connected"):
         blockers.append("BROKER_NOT_CONNECTED")
     if not settings.execution_api_key:
         blockers.append("EXECUTION_KEY_REQUIRED")
@@ -413,14 +461,31 @@ async def auto_trade_status():
         blockers.append("NEWS_EMBARGO_ACTIVE")
     elif not news_guard.get("safe"):
         blockers.append("NEWS_GUARD_UNHEALTHY")
-    blockers.append("AUTOPILOT_WORKER_NOT_DEPLOYED")
+    if not settings.autopilot_shared_secret:
+        blockers.append("AUTOPILOT_SECRET_REQUIRED")
+    elif not worker_online:
+        blockers.append("AUTOPILOT_WORKER_NOT_DEPLOYED")
+    elif not _autopilot_heartbeat.get("enabled"):
+        blockers.append("AUTOPILOT_DISABLED")
+
     return {
-        "enabled": False,
-        "ready": False,
+        "enabled": bool(worker_online and _autopilot_heartbeat.get("enabled")),
+        "ready": len(blockers) == 0,
         "blockers": blockers,
         "broker": broker_payload(),
+        "execution_transport": settings.live_execution_transport,
         "news_guard": news_guard,
         "risk_guard": risk_guard.status(),
+        "autopilot": {
+            "worker_online": worker_online,
+            "heartbeat_age_seconds": round(heartbeat_age, 1) if _autopilot_heartbeat.get("last_seen") else None,
+            "heartbeat_ttl_seconds": settings.autopilot_heartbeat_ttl_seconds,
+            "worker_id": _autopilot_heartbeat.get("worker_id"),
+            "version": _autopilot_heartbeat.get("version"),
+            "enabled": _autopilot_heartbeat.get("enabled", False),
+            "symbols": _autopilot_heartbeat.get("symbols", []),
+            "last_action": _autopilot_heartbeat.get("last_action"),
+        },
     }
 
 
