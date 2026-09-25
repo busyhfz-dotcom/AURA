@@ -1,6 +1,14 @@
-# AURA Terminal v3.3
+# AURA Terminal v3.4
 
 AURA is an institutional-style market intelligence, risk and execution workspace. The default product language is English; Persian is a first-class RTL locale using the same component system and data contracts.
+
+## v3.4 — Data-backed product workspace
+
+- Signals, Auto Trade, Positions, Orders, Performance, Analytics, News Guard and Economic Calendar now have independent product views instead of falling back to Terminal.
+- Added current cross-market signal-board, audited order history, open/closed position views, realized-only performance analytics and operational audit analytics.
+- Auto Trade reports explicit production blockers instead of exposing a cosmetic toggle.
+- News Guard and Economic Calendar report provider/configuration state without fabricating economic events.
+- Performance metrics are computed only from actually closed ledger positions.
 
 ## v3.3 — Reference shell fidelity + backend-driven terminal state
 
@@ -91,11 +99,9 @@ For real live deployment, isolate the MT5 adapter on a Windows worker/VM (or use
 
 ## Validation status
 
-- Backend Python compilation: passing.
-- Backend foundation suite: 6/6 passing.
-- API smoke test: health, 9-symbol market board, symbol snapshot and portfolio all responding correctly in paper/simulation mode.
-- TS/TSX compiler parse: passing for the rebuilt terminal, locale dictionary and page entry.
-- Full `next build` could not be executed in this environment because dependency installation from npm timed out; this is an environment/network limitation, not a claimed successful build.
+- GitHub Actions CI is enabled for backend compilation/tests and frontend TypeScript/build validation.
+- The v3.3 reference-shell QA passed both backend and frontend CI jobs before merge.
+- v3.4 adds coverage for realized performance aggregation and is validated by the same CI pipeline before merge.
 
 ## Next production layer
 

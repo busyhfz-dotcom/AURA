@@ -97,6 +97,21 @@ class AuraFoundationTests(unittest.TestCase):
             self.assertEqual(closed["status"], "CLOSED")
             self.assertGreater(ledger.metrics()["balance"], 10_000)
 
+    def test_performance_summary_uses_only_closed_positions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = AuraLedger(os.path.join(tmp, "aura.db"), 10_000)
+            broker = MT5ExecutionEngine(self.settings("paper"))
+            first = broker.send_order("EURUSD", "BUY", 1.085, 1.0825, 1.0925, 0.5)
+            first_refs = ledger.record_execution(first)
+            ledger.close_position(first_refs["position_id"], 1.086)
+
+            summary = ledger.performance_summary()
+            self.assertEqual(summary["closed_trades"], 1)
+            self.assertEqual(summary["wins"], 1)
+            self.assertEqual(summary["losses"], 0)
+            self.assertGreater(summary["net_realized"], 0)
+            self.assertEqual(len(summary["equity_curve"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.4.0 — Data-backed product pages
+
+### Product workspace
+- Added independent Signals, Auto Trade, Positions, Orders, Performance, Analytics, News Guard and Economic Calendar views.
+- Replaced sidebar fallbacks to Terminal with explicit product routes.
+- Added complete English/Persian copy for the new surfaces.
+
+### Backend data contracts
+- Added `GET /api/signals`, `/api/orders`, `/api/positions`, `/api/performance`, `/api/analytics`, `/api/calendar` and `/api/auto-trade`.
+- Added closed-position ledger queries and realized performance aggregation.
+- Performance output is based only on closed positions; unavailable statistics stay null instead of being invented.
+- Auto Trade remains explicitly locked until live mode, broker connectivity, execution authorization, News Guard and the future worker are all available.
+- Economic Calendar returns no events until a verified provider is configured.
+
+### Validation
+- Added realized-performance ledger coverage.
+- Uses repository CI for Python compile/tests and frontend TypeScript/build validation.
+
 ## 3.3.0 — Shell fidelity + backend-driven terminal state
 
 ### Frontend fidelity

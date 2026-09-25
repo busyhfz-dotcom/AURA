@@ -31,7 +31,7 @@ risk_guard = RiskGuard(
 
 app = FastAPI(
     title="AURA Market Intelligence API",
-    version="3.3.0",
+    version="3.4.0",
     description="Market structure analytics, durable execution audit and guarded trading infrastructure for AURA Terminal.",
 )
 
@@ -127,7 +127,7 @@ async def startup_event():
     ledger.add_audit(
         "system.start",
         "AURA API started.",
-        metadata={"version": "3.3.0", "execution_mode": settings.execution_mode},
+        metadata={"version": "3.4.0", "execution_mode": settings.execution_mode},
     )
 
 
@@ -136,7 +136,7 @@ async def health_check():
     news_guard = MarketFilter.news_guard_status()
     return {
         "status": "ONLINE",
-        "engine_version": "3.3.0",
+        "engine_version": "3.4.0",
         "execution_mode": settings.execution_mode.upper(),
         "max_risk_percent": settings.max_risk_percent,
         "broker": broker_payload(),
@@ -197,6 +197,92 @@ async def market_board():
         except Exception as exc:
             logger.warning("Unable to build market board row for %s: %s", symbol, exc)
     return {"items": items, "timestamp": int(time.time())}
+
+
+@app.get("/api/signals")
+async def signal_board():
+    items = []
+    for symbol in WATCHLIST_SYMBOLS:
+        try:
+            df, source = broker.get_market_candles(symbol)
+            analysis = engine.find_high_probability_setup(df, symbol)
+            items.append({
+                "symbol": symbol,
+                "source": source,
+                "market_status": broker.market_status(symbol, df=df, source=source),
+                "signal": analysis,
+            })
+        except Exception as exc:
+            logger.warning("Unable to build signal board row for %s: %s", symbol, exc)
+    return {"items": items, "timestamp": int(time.time())}
+
+
+@app.get("/api/orders")
+async def orders(limit: int = 50):
+    return {"orders": ledger.recent_orders(limit)}
+
+
+@app.get("/api/positions")
+async def positions(closed_limit: int = 100):
+    payload = portfolio_payload()
+    return {
+        "open": payload["positions"],
+        "closed": ledger.closed_positions(closed_limit),
+        "account": payload["account"],
+    }
+
+
+@app.get("/api/performance")
+async def performance():
+    return {
+        **ledger.performance_summary(),
+        "account": ledger.metrics(),
+    }
+
+
+@app.get("/api/analytics")
+async def analytics():
+    return {
+        "performance": ledger.performance_summary(),
+        "risk_guard": risk_guard.status(),
+        "account": portfolio_payload()["account"],
+        "recent_audit": ledger.recent_audit(12),
+    }
+
+
+@app.get("/api/calendar")
+async def calendar():
+    guard = MarketFilter.news_guard_status()
+    return {
+        "configured": guard["configured"],
+        "provider": guard.get("provider"),
+        "guard_active": guard["active"],
+        "message": guard.get("message"),
+        "events": [],
+    }
+
+
+@app.get("/api/auto-trade")
+async def auto_trade_status():
+    news_guard = MarketFilter.news_guard_status()
+    blockers = []
+    if settings.execution_mode != "live":
+        blockers.append("LIVE_MODE_REQUIRED")
+    if not broker.connected:
+        blockers.append("BROKER_NOT_CONNECTED")
+    if not settings.execution_api_key:
+        blockers.append("EXECUTION_KEY_REQUIRED")
+    if not news_guard["configured"]:
+        blockers.append("NEWS_GUARD_REQUIRED")
+    blockers.append("AUTOPILOT_WORKER_NOT_DEPLOYED")
+    return {
+        "enabled": False,
+        "ready": False,
+        "blockers": blockers,
+        "broker": broker_payload(),
+        "news_guard": news_guard,
+        "risk_guard": risk_guard.status(),
+    }
 
 
 @app.get("/api/portfolio")
@@ -342,7 +428,7 @@ async def websocket_signals(websocket: WebSocket):
             analysis = engine.find_high_probability_setup(df, symbol)
             payload = {
                 "timestamp": int(time.time()),
-                "engine_version": "3.3.0",
+                "engine_version": "3.4.0",
                 "market_data_source": source,
                 "market_status": broker.market_status(symbol, df=df, source=source),
                 "execution_mode": settings.execution_mode.upper(),
