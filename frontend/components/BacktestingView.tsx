@@ -72,7 +72,7 @@ function parseCsv(text: string): Bar[] {
     bars.push({ time: when.toISOString(), open, high, low, close });
   }
   bars.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-  const normalized = [...new Map(bars.map(bar => [bar.time, bar])).values()];
+  const normalized = Array.from(new Map(bars.map(bar => [bar.time, bar])).values());
   if (normalized.length < 80) throw new Error("At least 80 valid OHLC rows are required.");
   if (normalized.length > 50000) throw new Error("CSV is limited to 50,000 candles per run.");
   return normalized;
