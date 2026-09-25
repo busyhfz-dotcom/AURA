@@ -585,9 +585,9 @@ function SignalCard({ signal, t }: { signal: Signal; t: any }) {
   );
 }
 
-function ExecuteCard({ signal, portfolio, runtime, sizing, riskPercent, setRiskPercent, executing, onExecute, t }: { signal: Signal; portfolio: Portfolio; runtime: RuntimeState; sizing: PositionSizePreview | null; riskPercent: number; setRiskPercent: (v: number) => void; executing: boolean; onExecute: () => void; t: any }) {
+function ExecuteCard({ signal, portfolio, runtime, sizing, riskPercent, setRiskPercent, operatorKey, setOperatorKey, executing, onExecute, t }: { signal: Signal; portfolio: Portfolio; runtime: RuntimeState; sizing: PositionSizePreview | null; riskPercent: number; setRiskPercent: (v: number) => void; operatorKey: string; setOperatorKey: (v: string) => void; executing: boolean; onExecute: () => void; t: any }) {
   const ready = signal.status === 'A_PLUS_SETUP' && !!signal.action && !!signal.entry && !!signal.sl && !!signal.tp;
-  const canExecute = ready && !!sizing && (runtime.capabilities.paper_execution || runtime.capabilities.live_execution);
+  const canExecute = ready && !!sizing && (runtime.capabilities.paper_execution || (runtime.capabilities.live_execution && operatorKey.trim().length > 0));
   const lot = sizing?.lots || 0;
   const label = signal.action === 'SELL' ? t.executeSell : signal.action === 'BUY' ? t.executeBuy : t.executeOrder;
   return (
@@ -599,6 +599,7 @@ function ExecuteCard({ signal, portfolio, runtime, sizing, riskPercent, setRiskP
         <label><span className="mb-1.5 block text-[8px] text-[#8195a8]">{t.lotSizeAuto}</span><div className="aura-field flex items-center force-ltr">{lot ? lot.toFixed(2) : '—'}</div></label>
       </div>
       <div className="mt-2 flex gap-1.5">{[.5,1,2].filter(v => v <= (runtime.max_risk_percent || 1)).map(v => <button key={v} onClick={() => setRiskPercent(v)} className={`rounded px-2 py-1 text-[8px] ${riskPercent === v ? 'bg-[#1d5587] text-white' : 'bg-[#10243a] text-[#8599ac]'}`}>{v}%</button>)}</div>
+      {runtime.execution_mode === 'LIVE' && <label className="mt-3 block"><span className="mb-1.5 flex items-center justify-between text-[8px] text-[#8195a8]"><span>{t.operatorAuthorization}</span><span className="text-[#5f778c]">{t.idempotencyProtected}</span></span><input className="aura-field force-ltr" type="password" autoComplete="off" value={operatorKey} onChange={e => setOperatorKey(e.target.value)} placeholder={t.operatorKeyPlaceholder} /></label>}
       <button onClick={onExecute} disabled={!canExecute || executing} className="aura-execute mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-md text-[11px] font-bold transition">{executing ? <Zap className="h-3.5 w-3.5 animate-pulse" /> : <Play className="h-3.5 w-3.5 fill-current" />}{executing ? t.routing : label}<ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" /></button>
       {!canExecute && <div className="mt-2 text-center text-[8px] leading-4 text-[#586f84]">{t.riskBlocked}</div>}
     </section>
@@ -671,7 +672,7 @@ function RecentSignals({ signal, portfolio, t }: { signal: Signal; portfolio: Po
   );
 }
 
-function MobileTerminalView({ candles, signal, runtime, portfolio, sizing, riskPercent, setRiskPercent, executing, onExecute, streamState, t }: { candles: Candle[]; signal: Signal; runtime: RuntimeState; portfolio: Portfolio; sizing: PositionSizePreview | null; riskPercent: number; setRiskPercent: (v: number) => void; executing: boolean; onExecute: () => void; streamState: StreamState; t: any }) {
+function MobileTerminalView({ candles, signal, runtime, portfolio, sizing, riskPercent, setRiskPercent, operatorKey, setOperatorKey, executing, onExecute, streamState, t }: { candles: Candle[]; signal: Signal; runtime: RuntimeState; portfolio: Portfolio; sizing: PositionSizePreview | null; riskPercent: number; setRiskPercent: (v: number) => void; operatorKey: string; setOperatorKey: (v: string) => void; executing: boolean; onExecute: () => void; streamState: StreamState; t: any }) {
   const ready = signal.status === 'A_PLUS_SETUP' && !!signal.action;
   return (
     <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] px-3 pb-24 pt-3 md:hidden">
@@ -693,7 +694,7 @@ function MobileTerminalView({ candles, signal, runtime, portfolio, sizing, riskP
         </div>
         <div className="h-[285px] border-t border-[#173047]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} streamState={streamState} t={t} /></div>
         <div className="aura-thin-scroll flex items-center gap-2 overflow-x-auto border-t border-[#173047] px-3 py-2 text-[9px] text-[#7f94a8]">{['5m','15m','1h','4h','D'].map(tf => <button key={tf} className={`rounded px-3 py-1.5 ${tf === '15m' ? 'bg-[#153958] text-white' : 'bg-[#071522]'}`}>{tf}</button>)}</div>
-        <div className="p-3"><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizing} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={onExecute} t={t} /></div>
+        <div className="p-3"><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizing} riskPercent={riskPercent} setRiskPercent={setRiskPercent} operatorKey={operatorKey} setOperatorKey={setOperatorKey} executing={executing} onExecute={onExecute} t={t} /></div>
       </section>
     </main>
   );
@@ -728,6 +729,8 @@ export default function TradingTerminal() {
   const [markets, setMarkets] = useState<MarketItem[]>([]);
   const [riskPercent, setRiskPercent] = useState(1);
   const [sizingPreview, setSizingPreview] = useState<PositionSizePreview | null>(null);
+  const [operatorKey, setOperatorKey] = useState('');
+  const executionIdempotencyKey = useRef<string | null>(null);
   const [executing, setExecuting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -822,17 +825,48 @@ export default function TradingTerminal() {
 
   const execute = async () => {
     if (signal.status !== 'A_PLUS_SETUP' || !signal.action || !signal.entry || !signal.sl || !signal.tp) return;
+    if (!executionIdempotencyKey.current) {
+      executionIdempotencyKey.current = globalThis.crypto?.randomUUID?.() || `aura-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+    const requestKey = executionIdempotencyKey.current;
     setExecuting(true);
     try {
-      const response = await fetch(`${apiBase}/api/trade/execute`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: signal.symbol, action: signal.action, entry: signal.entry, sl: signal.sl, tp: signal.tp, risk_percent: riskPercent }) });
+      const headers: Record<string,string> = {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': requestKey,
+      };
+      if (runtime.execution_mode === 'LIVE' && operatorKey.trim()) {
+        headers['X-AURA-EXECUTION-KEY'] = operatorKey.trim();
+      }
+      const response = await fetch(`${apiBase}/api/trade/execute`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          symbol: signal.symbol,
+          action: signal.action,
+          entry: signal.entry,
+          sl: signal.sl,
+          tp: signal.tp,
+          risk_percent: riskPercent,
+        }),
+      });
       const result = await response.json();
       if (!response.ok) {
         const detail = typeof result.detail === 'string' ? result.detail : result.detail?.message || 'Execution rejected';
+        const deterministic = [401, 422, 423, 428].includes(response.status);
+        if (deterministic) executionIdempotencyKey.current = null;
         throw new Error(detail);
       }
-      setToast(`${result.status} · ${result.ledger_order_id || result.order_id} · ${result.lots} lots`); await refreshPortfolio();
-    } catch (error) { setToast(error instanceof Error ? error.message : 'Execution failed'); }
-    finally { setExecuting(false); }
+      executionIdempotencyKey.current = null;
+      setToast(`${result.status} · ${result.ledger_order_id || result.order_id} · ${result.lots} lots`);
+      await refreshPortfolio();
+    } catch (error) {
+      // Keep the same key after network/5xx/409 uncertainty. A retry can then recover
+      // the worker result without creating a second live order.
+      setToast(error instanceof Error ? error.message : 'Execution failed');
+    } finally {
+      setExecuting(false);
+    }
   };
 
   const closePosition = async (id: string) => {
@@ -862,7 +896,7 @@ export default function TradingTerminal() {
         : view === 'calendar' ? <CalendarView t={t} />
         : view === 'backtesting' ? <BacktestingView selectedSymbol={selectedSymbol} t={t} />
         : isMobile ? (
-          <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} streamState={streamState} t={t} />
+          <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} operatorKey={operatorKey} setOperatorKey={setOperatorKey} executing={executing} onExecute={execute} streamState={streamState} t={t} />
         ) : (
           <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] p-2 pb-20 md:p-2.5 xl:pb-2.5">
             <div className="aura-command-grid grid min-h-[510px] gap-2 lg:grid-cols-[minmax(0,1fr)_292px] xl:grid-cols-[minmax(0,1fr)_300px_210px]">
@@ -871,7 +905,7 @@ export default function TradingTerminal() {
                 <div className="h-[395px] min-h-[330px] xl:h-[425px]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} streamState={streamState} t={t} /></div>
                 <div className="flex h-8 items-center justify-between border-t border-[#173047]/70 bg-[#04111c] px-3 text-[8px] text-[#71869b]"><div className="flex gap-4"><span>1D</span><span>5D</span><span>1M</span><span>3M</span><span>6M</span><span>YTD</span><span>1Y</span><span>All</span></div><div className="flex items-center gap-3"><span className="hidden sm:inline">{utcClock()} (UTC)</span><span>%</span><span className="text-[#54a9ed]">log</span><span className="text-[#54a9ed]">auto</span></div></div>
               </section>
-              <div className="grid min-w-0 gap-2 md:grid-cols-2 lg:grid-cols-1 xl:flex xl:flex-col"><SignalCard signal={signal} t={t} /><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} /></div>
+              <div className="grid min-w-0 gap-2 md:grid-cols-2 lg:grid-cols-1 xl:flex xl:flex-col"><SignalCard signal={signal} t={t} /><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} operatorKey={operatorKey} setOperatorKey={setOperatorKey} executing={executing} onExecute={execute} t={t} /></div>
               <StatusColumn runtime={runtime} portfolio={portfolio} signal={signal} sizing={sizingPreview} riskPercent={riskPercent} t={t} />
             </div>
 
