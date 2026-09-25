@@ -8,11 +8,13 @@ from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconne
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backtest import AuraBacktestEngine, BacktestConfig
 from config import load_settings
 from engine.broker_engine import MT5ExecutionEngine
 from engine.institutional_confluence import InstitutionalConfluenceEngine
 from engine.market_filter import MarketFilter
 from ledger import AuraLedger
+from news_calendar import EconomicCalendarService
 from risk_guard import RiskGuard
 
 logging.basicConfig(level=logging.INFO)
@@ -28,10 +30,17 @@ risk_guard = RiskGuard(
     max_trades_per_day=settings.max_trades_per_day,
     max_daily_loss_percent=settings.max_daily_loss_percent,
 )
+calendar_service = EconomicCalendarService(
+    provider=settings.economic_calendar_provider,
+    api_key=settings.economic_calendar_api_key,
+    embargo_before_minutes=settings.news_embargo_before_minutes,
+    embargo_after_minutes=settings.news_embargo_after_minutes,
+)
+backtest_engine = AuraBacktestEngine(engine)
 
 app = FastAPI(
     title="AURA Market Intelligence API",
-    version="3.4.0",
+    version="3.5.0",
     description="Market structure analytics, durable execution audit and guarded trading infrastructure for AURA Terminal.",
 )
 
@@ -61,8 +70,18 @@ class SizingRequest(BaseModel):
     risk_percent: float = Field(default=0.5, ge=0.1, le=2.0)
 
 
+class BacktestRequest(BaseModel):
+    symbol: str = Field(default="EURUSD", min_length=3, max_length=16)
+    timeframe: Literal["M5", "M15", "M30", "H1", "H4"] = "M15"
+    bars: int = Field(default=1500, ge=120, le=5000)
+    starting_balance: float = Field(default=10_000.0, ge=100.0, le=100_000_000.0)
+    risk_percent: float = Field(default=1.0, ge=0.1, le=2.0)
+    entry_wait_bars: int = Field(default=8, ge=1, le=50)
+    max_hold_bars: int = Field(default=24, ge=1, le=250)
+
+
 def capabilities() -> dict:
-    news_guard = MarketFilter.news_guard_status()
+    news_guard = calendar_service.status(settings.default_symbol)
     live_ready = settings.live_execution_enabled and broker.connected and bool(settings.execution_api_key)
     return {
         "paper_execution": settings.execution_mode == "paper",
@@ -127,16 +146,16 @@ async def startup_event():
     ledger.add_audit(
         "system.start",
         "AURA API started.",
-        metadata={"version": "3.4.0", "execution_mode": settings.execution_mode},
+        metadata={"version": "3.5.0", "execution_mode": settings.execution_mode},
     )
 
 
 @app.get("/api/health")
 async def health_check():
-    news_guard = MarketFilter.news_guard_status()
+    news_guard = calendar_service.status(settings.default_symbol)
     return {
         "status": "ONLINE",
-        "engine_version": "3.4.0",
+        "engine_version": "3.5.0",
         "execution_mode": settings.execution_mode.upper(),
         "max_risk_percent": settings.max_risk_percent,
         "broker": broker_payload(),
@@ -251,20 +270,50 @@ async def analytics():
 
 
 @app.get("/api/calendar")
-async def calendar():
-    guard = MarketFilter.news_guard_status()
+async def calendar(symbol: str | None = None, hours: int = 48):
+    guard = calendar_service.status(symbol)
     return {
         "configured": guard["configured"],
         "provider": guard.get("provider"),
+        "provider_error": guard.get("provider_error"),
         "guard_active": guard["active"],
+        "safe": guard.get("safe", False),
         "message": guard.get("message"),
-        "events": [],
+        "embargo_before_minutes": guard.get("embargo_before_minutes"),
+        "embargo_after_minutes": guard.get("embargo_after_minutes"),
+        "blocking_events": guard.get("blocking_events", []),
+        "events": calendar_service.upcoming(hours=hours, symbol=symbol) if guard["configured"] else [],
     }
+
+
+@app.post("/api/backtest")
+async def backtest(request: BacktestRequest):
+    symbol = request.symbol.upper().strip()
+    effective_risk = min(float(request.risk_percent), settings.max_risk_percent)
+    try:
+        candles, source = broker.get_historical_candles(symbol, timeframe=request.timeframe, n_bars=request.bars)
+        result = backtest_engine.run(
+            candles,
+            BacktestConfig(
+                symbol=symbol,
+                timeframe=request.timeframe,
+                starting_balance=request.starting_balance,
+                risk_percent=effective_risk,
+                entry_wait_bars=request.entry_wait_bars,
+                max_hold_bars=request.max_hold_bars,
+            ),
+            source=source,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @app.get("/api/auto-trade")
 async def auto_trade_status():
-    news_guard = MarketFilter.news_guard_status()
+    news_guard = calendar_service.status(settings.default_symbol)
     blockers = []
     if settings.execution_mode != "live":
         blockers.append("LIVE_MODE_REQUIRED")
@@ -336,10 +385,21 @@ async def execute_trade(
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid operator execution key.")
 
-    if MarketFilter.is_news_embargo_active():
+    news_guard = calendar_service.status(symbol)
+    if settings.live_execution_enabled and not news_guard.get("configured"):
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
-            detail="Economic news guard is active. Execution is temporarily blocked.",
+            detail="Live execution is blocked until a verified economic calendar provider is configured.",
+        )
+    if settings.live_execution_enabled and not news_guard.get("safe", False):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=news_guard.get("message") or "Economic News Guard cannot verify a safe execution window.",
+        )
+    if news_guard.get("active"):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="High-impact economic news embargo is active. Execution is temporarily blocked.",
         )
 
     decision = risk_guard.evaluate(symbol)
@@ -436,7 +496,7 @@ async def websocket_signals(websocket: WebSocket):
                 "broker": broker_payload(),
                 "capabilities": capabilities(),
                 "active_session": MarketFilter.get_current_session(),
-                "news_guard": MarketFilter.news_guard_status(),
+                "news_guard": calendar_service.status(symbol),
                 "risk_guard": risk_guard.status(),
                 "portfolio": portfolio_payload(),
                 "signal": analysis,
