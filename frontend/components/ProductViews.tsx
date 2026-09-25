@@ -148,6 +148,8 @@ export function AutoTradeView({ t }: { t: any }) {
     BROKER_NOT_CONNECTED: t.brokerNotConnected,
     EXECUTION_KEY_REQUIRED: t.executionKeyRequired,
     NEWS_GUARD_REQUIRED: t.newsGuardRequired,
+    NEWS_GUARD_UNHEALTHY: t.newsGuardUnhealthy,
+    NEWS_EMBARGO_ACTIVE: t.newsEmbargoActive,
     AUTOPILOT_WORKER_NOT_DEPLOYED: t.workerNotDeployed,
   } as Record<string, string>)[code] || code;
 
