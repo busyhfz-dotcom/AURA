@@ -316,6 +316,7 @@ async def backtest_capabilities():
         "upload_ohlc": True,
         "mt5_history": bool(broker.connected),
         "simulation_history": False,
+        "max_risk_percent": settings.max_risk_percent,
         "supported_timeframes": ["M1", "M5", "M15", "M30", "H1", "H4", "D1"],
         "message": (
             "Use verified MT5 history or uploaded OHLC data. AURA simulation data is never used for performance backtests."
