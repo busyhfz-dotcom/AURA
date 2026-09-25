@@ -44,6 +44,13 @@ class Settings:
     max_trades_per_day: int
     max_daily_loss_percent: float
     execution_api_key: Optional[str]
+    news_provider: str
+    trading_economics_api_key: Optional[str]
+    news_countries: list[str]
+    news_min_importance: int
+    news_block_before_minutes: int
+    news_block_after_minutes: int
+    news_cache_seconds: int
 
     @property
     def live_execution_enabled(self) -> bool:
@@ -78,4 +85,18 @@ def load_settings() -> Settings:
         max_trades_per_day=_int_env("AURA_MAX_TRADES_PER_DAY", 8, 1, 100),
         max_daily_loss_percent=_float_env("AURA_MAX_DAILY_LOSS_PERCENT", 2.0, 0.25, 20.0),
         execution_api_key=os.getenv("AURA_EXECUTION_API_KEY") or None,
+        news_provider=os.getenv("AURA_NEWS_PROVIDER", "tradingeconomics").strip().lower(),
+        trading_economics_api_key=os.getenv("TRADING_ECONOMICS_API_KEY") or None,
+        news_countries=[
+            country.strip()
+            for country in os.getenv(
+                "AURA_NEWS_COUNTRIES",
+                "united states,euro area,united kingdom,japan,canada,australia,new zealand,switzerland",
+            ).split(",")
+            if country.strip()
+        ],
+        news_min_importance=_int_env("AURA_NEWS_MIN_IMPORTANCE", 3, 1, 3),
+        news_block_before_minutes=_int_env("AURA_NEWS_BLOCK_BEFORE_MINUTES", 30, 0, 240),
+        news_block_after_minutes=_int_env("AURA_NEWS_BLOCK_AFTER_MINUTES", 15, 0, 240),
+        news_cache_seconds=_int_env("AURA_NEWS_CACHE_SECONDS", 60, 10, 900),
     )
