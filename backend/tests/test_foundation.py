@@ -49,6 +49,23 @@ class AuraFoundationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             broker.send_order("EURUSD", "BUY", 1.085, 1.09, 1.08, 0.5)
 
+    def test_position_size_preview_uses_same_paper_model_as_execution(self):
+        broker = MT5ExecutionEngine(self.settings("paper"))
+        preview = broker.preview_position_size("EURUSD", "BUY", 1.085, 1.0825, 0.5, 10_000)
+        result = broker.send_order("EURUSD", "BUY", 1.085, 1.0825, 1.0925, 0.5, paper_balance=10_000)
+        self.assertEqual(preview["basis"], "PAPER_MODEL")
+        self.assertEqual(preview["lots"], result["lots"])
+        self.assertEqual(preview["risk_amount"], 50.0)
+
+    def test_simulation_market_status_never_invents_live_spread(self):
+        broker = MT5ExecutionEngine(self.settings("paper"))
+        df, source = broker.get_market_candles("EURUSD", n_bars=48)
+        status = broker.market_status("EURUSD", df=df, source=source)
+        self.assertEqual(status["source"], "SIMULATION")
+        self.assertIsNone(status["spread"])
+        self.assertIsNone(status["spread_points"])
+        self.assertIsNotNone(status["volatility_percent"])
+
     def test_ledger_persists_order_and_position(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = AuraLedger(os.path.join(tmp, "aura.db"), 10_000)
