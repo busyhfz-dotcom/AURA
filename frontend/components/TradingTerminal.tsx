@@ -44,13 +44,14 @@ import {
   AnalyticsView,
   AutoTradeView,
   CalendarView,
+  NewsGuardView,
   OrdersView,
   PerformanceView,
   PositionsView,
   SignalsView,
 } from './ProductViews';
 
-type View = 'terminal' | 'markets' | 'signals' | 'auto-trade' | 'positions' | 'orders' | 'performance' | 'backtesting' | 'analytics' | 'calendar';
+type View = 'terminal' | 'markets' | 'signals' | 'auto-trade' | 'positions' | 'orders' | 'performance' | 'backtesting' | 'news-guard' | 'analytics' | 'calendar';
 type StreamState = 'connected' | 'reconnecting' | 'offline';
 
 type Candle = {
@@ -443,7 +444,7 @@ function Sidebar({ view, setView, lang, setLang, t }: { view: View; setView: (vi
     [t.orders, ListOrdered, 'orders'],
     [t.performance, TrendingUp, 'performance'],
     [t.backtesting, LineChart, 'backtesting'],
-    [t.newsGuard, ShieldCheck, 'calendar'],
+    [t.newsGuard, ShieldCheck, 'news-guard'],
     [t.analytics, Gauge, 'analytics'],
     [t.calendar, CalendarDays, 'calendar'],
   ] as const;
@@ -456,7 +457,7 @@ function Sidebar({ view, setView, lang, setLang, t }: { view: View; setView: (vi
       <nav className="aura-thin-scroll flex-1 overflow-y-auto px-3 py-4">
         <div className="space-y-1">
           {nav.map(([label, Icon, target], index) => {
-            const active = target === view || (target === 'calendar' && view === 'calendar' && index === 8);
+            const active = target === view;
             return (
               <button key={`${label}-${index}`} onClick={() => setView(target)} className={`aura-nav-item ${active ? 'is-active' : ''}`}>
                 <Icon className="h-[15px] w-[15px] shrink-0" />
@@ -870,6 +871,7 @@ export default function TradingTerminal() {
         : view === 'orders' ? <OrdersView t={t} />
         : view === 'performance' ? <PerformanceView t={t} />
         : view === 'analytics' ? <AnalyticsView t={t} />
+        : view === 'news-guard' ? <NewsGuardView t={t} />
         : view === 'calendar' ? <CalendarView t={t} />
         : view === 'backtesting' ? <BacktestingView selectedMarket={selectedMarket} t={t} />
         : isMobile ? (
