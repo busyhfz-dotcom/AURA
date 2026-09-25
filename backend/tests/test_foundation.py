@@ -29,6 +29,13 @@ class AuraFoundationTests(unittest.TestCase):
             max_trades_per_day=8,
             max_daily_loss_percent=2.0,
             execution_api_key=None,
+            news_provider="tradingeconomics",
+            trading_economics_api_key=None,
+            news_countries=["united states", "euro area", "united kingdom", "japan"],
+            news_min_importance=3,
+            news_block_before_minutes=30,
+            news_block_after_minutes=15,
+            news_cache_seconds=60,
         )
 
     def test_engine_never_invents_setup_when_data_is_missing(self):
