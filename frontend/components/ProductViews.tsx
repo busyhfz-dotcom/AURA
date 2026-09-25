@@ -278,6 +278,18 @@ export function AnalyticsView({ t }: { t: any }) {
   return <Shell><PageHeader icon={Gauge} title={t.analytics} subtitle={t.analyticsPageNote} /><PageState loading={loading} error={error} empty={!data}>{data&&<div className="grid gap-3 lg:grid-cols-[1fr_.8fr]"><div className="space-y-3"><div className="grid gap-3 sm:grid-cols-3">{[[t.equity,money(data.account.equity)],[t.openPnl,money(data.account.unrealized_pnl)],[t.realizedToday,money(data.account.realized_today)]].map(([label,value])=><div key={String(label)} className="aura-panel rounded-lg p-4"><div className="text-[8px] text-[#6f8499]">{label}</div><div className="mt-2 aura-mono text-[17px] text-white">{value}</div></div>)}</div><section className="aura-panel rounded-lg p-4"><div className="text-[12px] font-semibold text-white">{t.riskGuard}</div><div className="mt-4 grid gap-3 sm:grid-cols-3 text-[9px]"><div><div className="text-[#6f8499]">{t.status}</div><div className="mt-1 text-[#2ae9bd]">{data.risk_guard.state}</div></div><div><div className="text-[#6f8499]">{t.openPositions}</div><div className="mt-1 aura-mono text-white">{data.risk_guard.metrics.open_positions}/{data.risk_guard.max_open_positions}</div></div><div><div className="text-[#6f8499]">{t.tradesToday}</div><div className="mt-1 aura-mono text-white">{data.risk_guard.metrics.trades_today}/{data.risk_guard.max_trades_per_day}</div></div></div></section></div><section className="aura-panel rounded-lg p-4"><div className="flex items-center gap-2 text-[12px] font-semibold text-white"><History className="h-4 w-4 text-[#62b9ff]" />{t.auditTrail}</div><div className="mt-4 space-y-2">{(data.recent_audit||[]).map((event:any)=><div key={event.id} className="rounded border border-[#153047] bg-[#05121e] p-2.5"><div className="flex items-center justify-between gap-2"><span className="aura-mono text-[8px] text-[#8eabc2]">{event.event_type}</span><span className="text-[7px] text-[#60768b]">{dateLabel(event.created_at)}</span></div><div className="mt-1 text-[9px] leading-4 text-[#c2d0dc]">{event.message}</div></div>)}</div></section></div>}</PageState></Shell>;
 }
 
+type CalendarEvent = {
+  event: string;
+  country?: string | null;
+  currency?: string | null;
+  time: string;
+  impact: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN' | string;
+  actual?: string | number | null;
+  estimate?: string | number | null;
+  previous?: string | number | null;
+  unit?: string | null;
+};
+
 type CalendarData = {
   configured: boolean;
   provider?: string | null;
