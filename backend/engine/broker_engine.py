@@ -78,16 +78,31 @@ class MT5ExecutionEngine:
             reason=self.connection_reason,
         )
 
-    def get_market_candles(self, symbol: str, n_bars: int = 160) -> tuple[pd.DataFrame, str]:
-        symbol = symbol.upper()
+    def get_historical_candles(self, symbol: str, timeframe: str = "M15", n_bars: int = 160) -> tuple[pd.DataFrame, str]:
+        symbol = symbol.upper().strip()
+        timeframe = timeframe.upper().strip()
+        n_bars = max(40, min(int(n_bars), 10_000))
+        mt5_timeframes = {
+            "M5": getattr(mt5, "TIMEFRAME_M5", None) if MT5_AVAILABLE else None,
+            "M15": getattr(mt5, "TIMEFRAME_M15", None) if MT5_AVAILABLE else None,
+            "M30": getattr(mt5, "TIMEFRAME_M30", None) if MT5_AVAILABLE else None,
+            "H1": getattr(mt5, "TIMEFRAME_H1", None) if MT5_AVAILABLE else None,
+            "H4": getattr(mt5, "TIMEFRAME_H4", None) if MT5_AVAILABLE else None,
+        }
+        if timeframe not in mt5_timeframes:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
         if self.connected:
-            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, n_bars)
+            rates = mt5.copy_rates_from_pos(symbol, mt5_timeframes[timeframe], 0, n_bars)
             if rates is not None and len(rates) > 0:
                 df = pd.DataFrame(rates)
                 df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
                 return df[["time", "open", "high", "low", "close"]], "MT5"
 
-        return self._simulation_candles(symbol, n_bars), "SIMULATION"
+        return self._simulation_candles(symbol, n_bars, timeframe=timeframe), "SIMULATION"
+
+    def get_market_candles(self, symbol: str, n_bars: int = 160) -> tuple[pd.DataFrame, str]:
+        return self.get_historical_candles(symbol, timeframe="M15", n_bars=n_bars)
 
     def market_status(self, symbol: str, df: pd.DataFrame | None = None, source: str | None = None) -> dict:
         symbol = symbol.upper().strip()
@@ -146,12 +161,14 @@ class MT5ExecutionEngine:
             "volatility_state": volatility_state,
         }
 
-    def _simulation_candles(self, symbol: str, n_bars: int) -> pd.DataFrame:
-        # Deterministic per 15-minute bucket so the UI does not jump randomly on every poll.
-        now = pd.Timestamp.now(tz="UTC").floor("15min")
-        bucket_seed = int(now.timestamp() // 900)
+    def _simulation_candles(self, symbol: str, n_bars: int, timeframe: str = "M15") -> pd.DataFrame:
+        timeframe = timeframe.upper()
+        frame_minutes = {"M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240}[timeframe]
+        # Deterministic per timeframe bucket so repeated reads are stable while the current bar is open.
+        now = pd.Timestamp.now(tz="UTC").floor(f"{frame_minutes}min")
+        bucket_seed = int(now.timestamp() // (frame_minutes * 60))
         symbol_seed = sum(ord(char) for char in symbol)
-        rng = np.random.default_rng(bucket_seed + symbol_seed)
+        rng = np.random.default_rng(bucket_seed + symbol_seed + frame_minutes * 10_000)
 
         base_prices = {
             "EURUSD": 1.0845,
@@ -177,8 +194,9 @@ class MT5ExecutionEngine:
             "SP500": 6.5,
         }
         scale = simulation_scales.get(symbol, 0.00028 if base < 10 else (0.035 if base < 500 else 1.2))
+        scale *= math.sqrt(frame_minutes / 15.0)
 
-        dates = pd.date_range(end=now, periods=n_bars, freq="15min", tz="UTC")
+        dates = pd.date_range(end=now, periods=n_bars, freq=f"{frame_minutes}min", tz="UTC")
         returns = rng.normal(0, scale, n_bars)
         close = base + np.cumsum(returns)
         wick = np.abs(rng.normal(scale * 0.72, scale * 0.3, n_bars))
