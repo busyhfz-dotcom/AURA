@@ -86,6 +86,16 @@ class AuraLedger:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS execution_requests (
+                    idempotency_key TEXT PRIMARY KEY,
+                    request_hash TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    result_json TEXT,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS backtest_runs (
                     id TEXT PRIMARY KEY,
                     strategy TEXT NOT NULL,
@@ -107,6 +117,7 @@ class AuraLedger:
                 CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
                 CREATE INDEX IF NOT EXISTS idx_positions_opened_at ON positions(opened_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_events(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_execution_requests_updated ON execution_requests(updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_backtests_created_at ON backtest_runs(created_at DESC);
                 """
             )
@@ -126,6 +137,90 @@ class AuraLedger:
                 (event_id, event_type, severity, message, json.dumps(metadata or {}), utc_now_iso()),
             )
         return event_id
+
+    def reserve_execution_request(self, idempotency_key: str, request_hash: str) -> dict:
+        key = (idempotency_key or "").strip()
+        if not key:
+            raise ValueError("Idempotency key is required.")
+        if len(key) > 128:
+            raise ValueError("Idempotency key is too long.")
+        now = utc_now_iso()
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT * FROM execution_requests WHERE idempotency_key = ?",
+                (key,),
+            ).fetchone()
+            if row is not None:
+                item = dict(row)
+                if item["request_hash"] != request_hash:
+                    raise ValueError("Idempotency key was already used for a different execution request.")
+                if item.get("result_json"):
+                    try:
+                        item["result"] = json.loads(item["result_json"])
+                    except json.JSONDecodeError:
+                        item["result"] = None
+                else:
+                    item["result"] = None
+                return item
+
+            self._conn.execute(
+                """
+                INSERT INTO execution_requests (
+                    idempotency_key, request_hash, state, result_json,
+                    error_message, created_at, updated_at
+                ) VALUES (?, ?, 'PENDING', NULL, NULL, ?, ?)
+                """,
+                (key, request_hash, now, now),
+            )
+        return {
+            "idempotency_key": key,
+            "request_hash": request_hash,
+            "state": "PENDING",
+            "result": None,
+            "error_message": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def complete_execution_request(self, idempotency_key: str, result: dict) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                UPDATE execution_requests
+                SET state = 'COMPLETED', result_json = ?, error_message = NULL, updated_at = ?
+                WHERE idempotency_key = ?
+                """,
+                (json.dumps(result), utc_now_iso(), idempotency_key),
+            )
+
+    def fail_execution_request(self, idempotency_key: str, message: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                UPDATE execution_requests
+                SET state = 'FAILED', error_message = ?, updated_at = ?
+                WHERE idempotency_key = ?
+                """,
+                (message, utc_now_iso(), idempotency_key),
+            )
+
+    def execution_request(self, idempotency_key: str) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM execution_requests WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        if item.get("result_json"):
+            try:
+                item["result"] = json.loads(item["result_json"])
+            except json.JSONDecodeError:
+                item["result"] = None
+        else:
+            item["result"] = None
+        return item
 
     def record_execution(self, result: dict) -> dict:
         order_id = f"ORD-{uuid.uuid4().hex[:12].upper()}"
