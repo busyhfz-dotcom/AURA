@@ -52,6 +52,8 @@ class Settings:
     execution_worker_url: Optional[str]
     execution_worker_secret: Optional[str]
     execution_worker_timeout_seconds: int
+    autopilot_shared_secret: Optional[str]
+    autopilot_heartbeat_ttl_seconds: int
 
     @property
     def live_execution_enabled(self) -> bool:
@@ -98,4 +100,6 @@ def load_settings() -> Settings:
         execution_worker_url=(os.getenv("AURA_EXECUTION_WORKER_URL") or "").strip().rstrip("/") or None,
         execution_worker_secret=os.getenv("AURA_EXECUTION_WORKER_SECRET") or None,
         execution_worker_timeout_seconds=_int_env("AURA_EXECUTION_WORKER_TIMEOUT_SECONDS", 10, 2, 60),
+        autopilot_shared_secret=os.getenv("AURA_AUTOPILOT_SHARED_SECRET") or None,
+        autopilot_heartbeat_ttl_seconds=_int_env("AURA_AUTOPILOT_HEARTBEAT_TTL_SECONDS", 90, 30, 600),
     )
