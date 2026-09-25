@@ -89,6 +89,63 @@ class MT5ExecutionEngine:
 
         return self._simulation_candles(symbol, n_bars), "SIMULATION"
 
+    def market_status(self, symbol: str, df: pd.DataFrame | None = None, source: str | None = None) -> dict:
+        symbol = symbol.upper().strip()
+        if df is None or df.empty:
+            df, resolved_source = self.get_market_candles(symbol, n_bars=48)
+            source = source or resolved_source
+        source = source or ("MT5" if self.connected else "SIMULATION")
+
+        if df.empty:
+            return {
+                "symbol": symbol,
+                "source": source,
+                "last_price": None,
+                "bid": None,
+                "ask": None,
+                "spread": None,
+                "spread_points": None,
+                "volatility_percent": None,
+                "volatility_state": "UNAVAILABLE",
+            }
+
+        last_price = float(df.iloc[-1]["close"])
+        recent = df.tail(min(len(df), 20))
+        mean_range = float((recent["high"] - recent["low"]).mean()) if len(recent) else 0.0
+        volatility_percent = (mean_range / last_price * 100.0) if last_price else 0.0
+        if volatility_percent < 0.04:
+            volatility_state = "LOW"
+        elif volatility_percent < 0.30:
+            volatility_state = "NORMAL"
+        else:
+            volatility_state = "ELEVATED"
+
+        bid = ask = spread = spread_points = None
+        if self.connected and MT5_AVAILABLE:
+            try:
+                tick = mt5.symbol_info_tick(symbol)
+                info = mt5.symbol_info(symbol)
+                if tick is not None:
+                    bid = float(tick.bid)
+                    ask = float(tick.ask)
+                    spread = max(0.0, ask - bid)
+                    point = float(info.point) if info is not None and info.point else None
+                    spread_points = (spread / point) if point else None
+            except Exception as exc:
+                logger.warning("Unable to read live quote metadata for %s: %s", symbol, exc)
+
+        return {
+            "symbol": symbol,
+            "source": source,
+            "last_price": round(last_price, 8),
+            "bid": round(bid, 8) if bid is not None else None,
+            "ask": round(ask, 8) if ask is not None else None,
+            "spread": round(spread, 8) if spread is not None else None,
+            "spread_points": round(spread_points, 2) if spread_points is not None else None,
+            "volatility_percent": round(volatility_percent, 4),
+            "volatility_state": volatility_state,
+        }
+
     def _simulation_candles(self, symbol: str, n_bars: int) -> pd.DataFrame:
         # Deterministic per 15-minute bucket so the UI does not jump randomly on every poll.
         now = pd.Timestamp.now(tz="UTC").floor("15min")
@@ -179,6 +236,60 @@ class MT5ExecutionEngine:
         volume = max(info.volume_min, min(info.volume_max, volume))
         precision = max(0, int(round(-math.log10(step)))) if step < 1 else 0
         return round(volume, precision)
+
+    def preview_position_size(
+        self,
+        symbol: str,
+        action: str,
+        entry: float,
+        sl: float,
+        risk_percent: float,
+        balance: float,
+    ) -> dict:
+        symbol = symbol.upper().strip()
+        action = action.upper().strip()
+        if action not in {"BUY", "SELL"}:
+            raise ValueError("Action must be BUY or SELL.")
+        if entry <= 0 or sl <= 0:
+            raise ValueError("Entry and stop loss must be positive values.")
+        if entry == sl:
+            raise ValueError("Stop loss must be different from entry price.")
+
+        risk_percent = min(max(float(risk_percent), 0.1), self.settings.max_risk_percent)
+        balance = max(float(balance), 0.0)
+        risk_amount = balance * (risk_percent / 100.0)
+        stop_distance = abs(entry - sl)
+        pip_size = 0.01 if symbol.endswith("JPY") else (0.0001 if symbol.endswith("USD") and symbol not in {"XAUUSD", "BTCUSD", "ETHUSD"} else None)
+        stop_pips = (stop_distance / pip_size) if pip_size else None
+        estimated_margin = None
+
+        if self.settings.live_execution_enabled and self.connected and MT5_AVAILABLE:
+            volume = self._live_volume(symbol, action, entry, sl, risk_percent)
+            try:
+                order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
+                margin = mt5.order_calc_margin(order_type, symbol, volume, entry)
+                estimated_margin = float(margin) if margin is not None else None
+            except Exception as exc:
+                logger.warning("Unable to estimate margin for %s: %s", symbol, exc)
+            basis = "MT5"
+        else:
+            volume = self._paper_volume(symbol, balance, risk_percent, entry, sl)
+            basis = "PAPER_MODEL"
+
+        return {
+            "symbol": symbol,
+            "action": action,
+            "risk_percent": round(risk_percent, 3),
+            "balance": round(balance, 2),
+            "risk_amount": round(risk_amount, 2),
+            "entry": entry,
+            "sl": sl,
+            "stop_distance": round(stop_distance, 8),
+            "stop_pips": round(stop_pips, 2) if stop_pips is not None else None,
+            "lots": volume,
+            "estimated_margin": round(estimated_margin, 2) if estimated_margin is not None else None,
+            "basis": basis,
+        }
 
     def live_positions(self) -> list[dict]:
         if not self.connected or not MT5_AVAILABLE:
