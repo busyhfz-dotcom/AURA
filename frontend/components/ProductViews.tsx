@@ -276,16 +276,157 @@ export function AnalyticsView({ t }: { t: any }) {
   return <Shell><PageHeader icon={Gauge} title={t.analytics} subtitle={t.analyticsPageNote} /><PageState loading={loading} error={error} empty={!data}>{data&&<div className="grid gap-3 lg:grid-cols-[1fr_.8fr]"><div className="space-y-3"><div className="grid gap-3 sm:grid-cols-3">{[[t.equity,money(data.account.equity)],[t.openPnl,money(data.account.unrealized_pnl)],[t.realizedToday,money(data.account.realized_today)]].map(([label,value])=><div key={String(label)} className="aura-panel rounded-lg p-4"><div className="text-[8px] text-[#6f8499]">{label}</div><div className="mt-2 aura-mono text-[17px] text-white">{value}</div></div>)}</div><section className="aura-panel rounded-lg p-4"><div className="text-[12px] font-semibold text-white">{t.riskGuard}</div><div className="mt-4 grid gap-3 sm:grid-cols-3 text-[9px]"><div><div className="text-[#6f8499]">{t.status}</div><div className="mt-1 text-[#2ae9bd]">{data.risk_guard.state}</div></div><div><div className="text-[#6f8499]">{t.openPositions}</div><div className="mt-1 aura-mono text-white">{data.risk_guard.metrics.open_positions}/{data.risk_guard.max_open_positions}</div></div><div><div className="text-[#6f8499]">{t.tradesToday}</div><div className="mt-1 aura-mono text-white">{data.risk_guard.metrics.trades_today}/{data.risk_guard.max_trades_per_day}</div></div></div></section></div><section className="aura-panel rounded-lg p-4"><div className="flex items-center gap-2 text-[12px] font-semibold text-white"><History className="h-4 w-4 text-[#62b9ff]" />{t.auditTrail}</div><div className="mt-4 space-y-2">{(data.recent_audit||[]).map((event:any)=><div key={event.id} className="rounded border border-[#153047] bg-[#05121e] p-2.5"><div className="flex items-center justify-between gap-2"><span className="aura-mono text-[8px] text-[#8eabc2]">{event.event_type}</span><span className="text-[7px] text-[#60768b]">{dateLabel(event.created_at)}</span></div><div className="mt-1 text-[9px] leading-4 text-[#c2d0dc]">{event.message}</div></div>)}</div></section></div>}</PageState></Shell>;
 }
 
-type CalendarData = { configured: boolean; provider?: string | null; guard_active: boolean; message?: string | null; events: any[] };
+type CalendarEvent = {
+  event: string;
+  country?: string | null;
+  currency?: string | null;
+  time: string;
+  impact: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN' | string;
+  actual?: string | number | null;
+  estimate?: string | number | null;
+  previous?: string | number | null;
+  unit?: string | null;
+};
+
+type CalendarData = {
+  configured: boolean;
+  provider?: string | null;
+  provider_error?: string | null;
+  guard_active: boolean;
+  safe?: boolean;
+  message?: string | null;
+  embargo_before_minutes?: number | null;
+  embargo_after_minutes?: number | null;
+  blocking_events?: CalendarEvent[];
+  events: CalendarEvent[];
+};
+
+function impactClass(impact?: string) {
+  if (impact === 'HIGH') return 'border-[#713342] bg-[#2b141c] text-[#ff758a]';
+  if (impact === 'MEDIUM') return 'border-[#5d4c2e] bg-[#241d10] text-[#e6bc72]';
+  if (impact === 'LOW') return 'border-[#1b5146] bg-[#0b2823] text-[#64d5ba]';
+  return 'border-[#254057] bg-[#0a1a27] text-[#8ca4b8]';
+}
+
+function impactLabel(impact: string, t: any) {
+  if (impact === 'HIGH') return t.highImpact;
+  if (impact === 'MEDIUM') return t.mediumImpact;
+  if (impact === 'LOW') return t.lowImpact;
+  return impact || '—';
+}
+
+function CalendarEventList({ events, t }: { events: CalendarEvent[]; t: any }) {
+  if (!events.length) return <div className="flex min-h-[220px] items-center justify-center text-center"><div><CalendarDays className="mx-auto h-7 w-7 text-[#365069]" /><div className="mt-3 text-[10px] text-[#b0c0cd]">{t.noCalendarEvents}</div><div className="mt-1 max-w-[360px] text-[8px] leading-4 text-[#60768b]">{t.calendarProviderRequired}</div></div></div>;
+  return <div className="mt-4 space-y-2">{events.map((event,index) => <div key={`${event.time}-${event.event}-${index}`} className="grid gap-3 rounded-md border border-[#173047] bg-[#05121e] p-3 sm:grid-cols-[110px_70px_minmax(0,1fr)_auto] sm:items-center">
+    <div className="force-ltr">
+      <div className="aura-mono text-[9px] text-white">{new Date(event.time).toLocaleDateString()}</div>
+      <div className="mt-1 aura-mono text-[8px] text-[#71869b]">{new Date(event.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+    </div>
+    <div><span className="aura-mono rounded bg-[#10263a] px-2 py-1 text-[8px] text-[#b8c9d7]">{event.currency || event.country || '—'}</span></div>
+    <div className="min-w-0"><div className="truncate text-[10px] font-medium text-[#dbe6ef]">{event.event}</div><div className="mt-1 flex flex-wrap gap-3 text-[8px] text-[#71869b]"><span>{t.actual}: <b className="font-normal text-[#b7c6d3]">{event.actual ?? '—'}</b></span><span>{t.estimate}: <b className="font-normal text-[#b7c6d3]">{event.estimate ?? '—'}</b></span><span>{t.previous}: <b className="font-normal text-[#b7c6d3]">{event.previous ?? '—'}</b></span></div></div>
+    <div><span className={`rounded border px-2 py-1 text-[8px] font-semibold ${impactClass(event.impact)}`}>{impactLabel(event.impact,t)}</span></div>
+  </div>)}</div>;
+}
 
 export function NewsGuardView({ t }: { t: any }) {
-  const [data,setData]=useState<CalendarData|null>(null); const [loading,setLoading]=useState(true); const [error,setError]=useState<string|null>(null);
-  useEffect(()=>{let alive=true;fetch(`${apiBase}/api/calendar`).then(async r=>{if(!r.ok)throw new Error('Unable to load News Guard state.');return r.json();}).then(v=>alive&&setData(v)).catch(e=>alive&&setError(e.message)).finally(()=>alive&&setLoading(false));return()=>{alive=false};},[]);
-  return <Shell><PageHeader icon={ShieldCheck} title={t.newsGuard} subtitle={t.newsGuardPageNote} badge={data?.configured ? t.guardOperational : t.notConfigured} /><PageState loading={loading} error={error} empty={!data}>{data&&<div className="grid gap-3 lg:grid-cols-[1fr_.8fr]"><section className="aura-panel rounded-lg p-5"><div className="flex items-center justify-between"><div><div className="text-[12px] font-semibold text-white">{t.newsGuard}</div><div className="mt-1 text-[9px] text-[#70869a]">{data.message || t.newsPending}</div></div><div className={`flex h-11 w-11 items-center justify-center rounded-full ${data.configured ? 'bg-[#0b493a] text-[#2ae9bd]' : 'bg-[#3c2f1b] text-[#e6b866]'}`}><ShieldCheck className="h-5 w-5" /></div></div><div className="mt-5 grid gap-3 sm:grid-cols-2"><div className="rounded border border-[#173047] bg-[#05121e] p-3"><div className="text-[8px] text-[#71869b]">{t.provider}</div><div className="mt-1 aura-mono text-[10px] text-white">{data.provider || '—'}</div></div><div className="rounded border border-[#173047] bg-[#05121e] p-3"><div className="text-[8px] text-[#71869b]">{t.status}</div><div className={`mt-1 text-[10px] ${data.guard_active ? 'text-[#ff536d]' : data.configured ? 'text-[#2ae9bd]' : 'text-[#e6b866]'}`}>{data.guard_active ? t.embargoActive : data.configured ? t.guardInactive : t.notConfigured}</div></div></div></section><section className="aura-panel rounded-lg p-5"><div className="text-[12px] font-semibold text-white">{t.systemIntegrity}</div><div className="mt-4 space-y-3 text-[9px]"><div className="flex items-center justify-between border-b border-[#173047] pb-3"><span className="text-[#71869b]">{t.provider}</span><span className={data.configured ? 'text-[#2ae9bd]' : 'text-[#e6b866]'}>{data.configured ? t.connected : t.notConfigured}</span></div><div className="flex items-center justify-between"><span className="text-[#71869b]">{t.newsGuard}</span><span className={data.guard_active ? 'text-[#ff536d]' : data.configured ? 'text-[#2ae9bd]' : 'text-[#e6b866]'}>{data.guard_active ? t.embargoActive : data.configured ? t.safe : t.notConfigured}</span></div></div></section></div>}</PageState></Shell>;
+  const [data,setData]=useState<CalendarData|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState<string|null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/calendar?hours=48`);
+      if (!response.ok) throw new Error('Unable to load News Guard state.');
+      setData(await response.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load News Guard state.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 60_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const stateClass = data?.provider_error ? 'text-[#ff536d]' : data?.guard_active ? 'text-[#ff536d]' : data?.safe ? 'text-[#2ae9bd]' : 'text-[#e6b866]';
+  const stateLabel = data?.provider_error ? t.providerError : data?.guard_active ? t.embargoActive : data?.safe ? t.safe : t.notConfigured;
+
+  return <Shell>
+    <PageHeader icon={ShieldCheck} title={t.newsGuard} subtitle={t.newsGuardPageNote} badge={data?.safe ? t.guardOperational : data?.guard_active ? t.embargoActive : t.notConfigured} />
+    <PageState loading={loading} error={error} empty={!data}>
+      {data&&<div className="grid gap-3 lg:grid-cols-[1fr_.8fr]">
+        <section className="aura-panel rounded-lg p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div><div className="text-[12px] font-semibold text-white">{t.newsGuard}</div><div className="mt-1 text-[9px] leading-4 text-[#70869a]">{data.message || t.newsPending}</div></div>
+            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${data.guard_active || data.provider_error ? 'bg-[#321e2a] text-[#ff7085]' : data.safe ? 'bg-[#0b493a] text-[#2ae9bd]' : 'bg-[#3c2f1b] text-[#e6b866]'}`}><ShieldCheck className="h-5 w-5" /></div>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="rounded border border-[#173047] bg-[#05121e] p-3"><div className="text-[8px] text-[#71869b]">{t.provider}</div><div className="mt-1 aura-mono text-[10px] text-white">{data.provider || '—'}</div></div>
+            <div className="rounded border border-[#173047] bg-[#05121e] p-3"><div className="text-[8px] text-[#71869b]">{t.status}</div><div className={`mt-1 text-[10px] ${stateClass}`}>{stateLabel}</div></div>
+          </div>
+          {data.provider_error && <div className="mt-3 rounded border border-[#633041] bg-[#24111a] p-3 text-[8px] leading-4 text-[#ff8394]"><AlertTriangle className="mr-1.5 inline h-3.5 w-3.5 rtl:ml-1.5 rtl:mr-0" />{data.provider_error}</div>}
+          <div className="mt-3 rounded border border-[#173047] bg-[#05121e] p-3 text-[8px] text-[#8298aa]">
+            Embargo: <span className="aura-mono text-[#c0cfdb]">-{data.embargo_before_minutes ?? '—'}m / +{data.embargo_after_minutes ?? '—'}m</span>
+          </div>
+        </section>
+        <section className="aura-panel rounded-lg p-5">
+          <div className="flex items-center justify-between"><div className="text-[12px] font-semibold text-white">{t.systemIntegrity}</div><button onClick={load} className="rounded border border-[#173047] p-1.5 text-[#71869b] hover:text-white"><RefreshCcw className="h-3.5 w-3.5" /></button></div>
+          <div className="mt-4 space-y-3 text-[9px]">
+            <div className="flex items-center justify-between border-b border-[#173047] pb-3"><span className="text-[#71869b]">{t.provider}</span><span className={data.configured && !data.provider_error ? 'text-[#2ae9bd]' : 'text-[#e6b866]'}>{data.configured && !data.provider_error ? t.connected : data.provider_error ? t.providerError : t.notConfigured}</span></div>
+            <div className="flex items-center justify-between border-b border-[#173047] pb-3"><span className="text-[#71869b]">{t.newsGuard}</span><span className={stateClass}>{stateLabel}</span></div>
+            <div className="flex items-center justify-between"><span className="text-[#71869b]">{t.upcomingEvents}</span><span className="aura-mono text-white">{data.events.length}</span></div>
+          </div>
+          {!!data.blocking_events?.length && <div className="mt-4 rounded-md border border-[#713342] bg-[#2b141c] p-3"><div className="text-[9px] font-semibold text-[#ff758a]">{t.embargoActive}</div><div className="mt-2 space-y-1">{data.blocking_events.map((event,index)=><div key={index} className="text-[8px] text-[#d7a7b0]">{event.currency || '—'} · {event.event}</div>)}</div></div>}
+        </section>
+      </div>}
+    </PageState>
+  </Shell>;
 }
 
 export function CalendarView({ t }: { t: any }) {
-  const [data,setData]=useState<CalendarData|null>(null); const [loading,setLoading]=useState(true); const [error,setError]=useState<string|null>(null);
-  useEffect(()=>{let alive=true;fetch(`${apiBase}/api/calendar`).then(async r=>{if(!r.ok)throw new Error('Unable to load calendar state.');return r.json();}).then(v=>alive&&setData(v)).catch(e=>alive&&setError(e.message)).finally(()=>alive&&setLoading(false));return()=>{alive=false};},[]);
-  return <Shell><PageHeader icon={CalendarDays} title={t.calendar} subtitle={t.calendarPageNote} badge={data?.configured ? (data.provider || 'CONNECTED') : t.notConfigured} /><PageState loading={loading} error={error} empty={!data}>{data&&<div className="grid gap-3 lg:grid-cols-[.8fr_1.2fr]"><section className="aura-panel rounded-lg p-5"><div className="flex items-center justify-between"><div className="text-[12px] font-semibold text-white">{t.newsGuard}</div><ShieldCheck className={`h-5 w-5 ${data.configured ? 'text-[#2ae9bd]' : 'text-[#e6b866]'}`} /></div><div className="mt-4 text-[9px] leading-5 text-[#90a4b6]">{data.message || t.newsPending}</div><div className="mt-4 rounded-md border border-[#173047] bg-[#05121e] p-3 text-[9px]"><div className="flex justify-between"><span className="text-[#71869b]">{t.provider}</span><span className="aura-mono text-white">{data.provider || '—'}</span></div><div className="mt-3 flex justify-between"><span className="text-[#71869b]">{t.status}</span><span className={data.guard_active ? 'text-[#ff536d]' : data.configured ? 'text-[#2ae9bd]' : 'text-[#e6b866]'}>{data.guard_active ? t.embargoActive : data.configured ? t.safe : t.notConfigured}</span></div></div></section><section className="aura-panel rounded-lg p-5"><div className="flex items-center justify-between"><div className="text-[12px] font-semibold text-white">{t.upcomingEvents}</div><Clock3 className="h-4 w-4 text-[#60768b]" /></div>{data.events.length ? <div className="mt-4">{data.events.map((event:any,index:number)=><div key={index}>{JSON.stringify(event)}</div>)}</div> : <div className="flex min-h-[220px] items-center justify-center text-center"><div><CalendarDays className="mx-auto h-7 w-7 text-[#365069]" /><div className="mt-3 text-[10px] text-[#b0c0cd]">{t.noCalendarEvents}</div><div className="mt-1 max-w-[360px] text-[8px] leading-4 text-[#60768b]">{t.calendarProviderRequired}</div></div></div>}</section></div>}</PageState></Shell>;
+  const [data,setData]=useState<CalendarData|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState<string|null>(null);
+
+  const load=useCallback(async()=>{
+    setError(null);
+    try {
+      const response=await fetch(`${apiBase}/api/calendar?hours=72`);
+      if(!response.ok) throw new Error('Unable to load calendar state.');
+      setData(await response.json());
+    } catch(err) {
+      setError(err instanceof Error ? err.message : 'Unable to load calendar state.');
+    } finally {
+      setLoading(false);
+    }
+  },[]);
+
+  useEffect(()=>{load();const id=setInterval(load,120_000);return()=>clearInterval(id);},[load]);
+
+  return <Shell>
+    <PageHeader icon={CalendarDays} title={t.calendar} subtitle={t.calendarPageNote} badge={data?.configured ? (data.provider || 'CONNECTED').toUpperCase() : t.notConfigured} />
+    <PageState loading={loading} error={error} empty={!data}>
+      {data&&<div className="grid gap-3 lg:grid-cols-[.7fr_1.3fr]">
+        <section className="aura-panel rounded-lg p-5">
+          <div className="flex items-center justify-between"><div className="text-[12px] font-semibold text-white">{t.newsGuard}</div><ShieldCheck className={`h-5 w-5 ${data.guard_active || data.provider_error ? 'text-[#ff536d]' : data.safe ? 'text-[#2ae9bd]' : 'text-[#e6b866]'}`} /></div>
+          <div className="mt-4 text-[9px] leading-5 text-[#90a4b6]">{data.message || t.newsPending}</div>
+          <div className="mt-4 rounded-md border border-[#173047] bg-[#05121e] p-3 text-[9px]">
+            <div className="flex justify-between"><span className="text-[#71869b]">{t.provider}</span><span className="aura-mono text-white">{data.provider || '—'}</span></div>
+            <div className="mt-3 flex justify-between"><span className="text-[#71869b]">{t.status}</span><span className={data.guard_active || data.provider_error ? 'text-[#ff536d]' : data.safe ? 'text-[#2ae9bd]' : 'text-[#e6b866]'}>{data.provider_error ? t.providerError : data.guard_active ? t.embargoActive : data.safe ? t.safe : t.notConfigured}</span></div>
+            <div className="mt-3 flex justify-between"><span className="text-[#71869b]">{t.upcomingEvents}</span><span className="aura-mono text-white">{data.events.length}</span></div>
+          </div>
+          {data.provider_error && <div className="mt-3 rounded border border-[#633041] bg-[#24111a] p-3 text-[8px] leading-4 text-[#ff8394]">{data.provider_error}</div>}
+        </section>
+        <section className="aura-panel rounded-lg p-5">
+          <div className="flex items-center justify-between"><div className="text-[12px] font-semibold text-white">{t.upcomingEvents}</div><Clock3 className="h-4 w-4 text-[#60768b]" /></div>
+          <CalendarEventList events={data.events} t={t} />
+        </section>
+      </div>}
+    </PageState>
+  </Shell>;
 }
+
