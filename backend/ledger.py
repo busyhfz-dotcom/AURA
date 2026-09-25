@@ -204,6 +204,17 @@ class AuraLedger:
                 (message, utc_now_iso(), idempotency_key),
             )
 
+    def mark_execution_request_unknown(self, idempotency_key: str, message: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                UPDATE execution_requests
+                SET state = 'UNKNOWN', error_message = ?, updated_at = ?
+                WHERE idempotency_key = ?
+                """,
+                (message, utc_now_iso(), idempotency_key),
+            )
+
     def execution_request(self, idempotency_key: str) -> Optional[dict]:
         with self._lock:
             row = self._conn.execute(
