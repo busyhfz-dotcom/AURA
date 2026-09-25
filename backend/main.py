@@ -195,9 +195,25 @@ def broker_payload() -> dict:
     }
 
 
+def _market_candles(symbol: str, n_bars: int = 160, timeframe: str = "M15") -> tuple[pd.DataFrame, str]:
+    symbol = symbol.upper().strip()
+    if settings.execution_mode == "live" and settings.live_execution_transport == "worker":
+        health = _worker_health()
+        if not health.get("connected"):
+            raise RuntimeError(health.get("reason") or "MT5 execution worker market data is unavailable.")
+        payload = execution_worker.candles(symbol, timeframe=timeframe, bars=max(40, n_bars))
+        rows = payload.get("candles", [])
+        if not rows:
+            raise RuntimeError(f"MT5 execution worker returned no candles for {symbol}.")
+        df = pd.DataFrame(rows)
+        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+        return df[["time", "open", "high", "low", "close"]].tail(n_bars).reset_index(drop=True), "MT5_WORKER"
+    return broker.get_market_candles(symbol, n_bars=n_bars)
+
+
 def _mark_for_symbol(symbol: str) -> float | None:
     try:
-        df, _ = broker.get_market_candles(symbol, n_bars=2)
+        df, _ = _market_candles(symbol, n_bars=2)
         if df.empty:
             return None
         return float(df.iloc[-1]["close"])
@@ -262,7 +278,7 @@ async def health_check():
 @app.get("/api/market/{symbol}")
 async def market_snapshot(symbol: str):
     symbol = symbol.upper().strip()
-    df, source = broker.get_market_candles(symbol)
+    df, source = _market_candles(symbol)
     analysis = engine.find_high_probability_setup(df, symbol)
     return {
         "timestamp": int(time.time()),
@@ -290,7 +306,7 @@ async def market_board():
     items = []
     for symbol in WATCHLIST_SYMBOLS:
         try:
-            df, source = broker.get_market_candles(symbol, n_bars=48)
+            df, source = _market_candles(symbol, n_bars=48)
             if df.empty:
                 continue
             current = float(df.iloc[-1]["close"])
@@ -316,7 +332,7 @@ async def signal_board():
     items = []
     for symbol in WATCHLIST_SYMBOLS:
         try:
-            df, source = broker.get_market_candles(symbol)
+            df, source = _market_candles(symbol)
             analysis = engine.find_high_probability_setup(df, symbol)
             items.append({
                 "symbol": symbol,
@@ -747,7 +763,7 @@ async def websocket_signals(websocket: WebSocket):
     logger.info("Client connected to AURA analytics stream for %s.", symbol)
     try:
         while True:
-            df, source = broker.get_market_candles(symbol)
+            df, source = _market_candles(symbol)
             analysis = engine.find_high_probability_setup(df, symbol)
             payload = {
                 "timestamp": int(time.time()),
