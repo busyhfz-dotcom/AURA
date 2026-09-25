@@ -364,6 +364,38 @@ class MT5ExecutionEngine:
         symbol = symbol.upper().strip()
         return any(position["symbol"].upper() == symbol for position in self.live_positions())
 
+    def _select_filling_mode(self, symbol: str, request: dict) -> int:
+        info = mt5.symbol_info(symbol)
+        candidates: list[int] = []
+        if info is not None:
+            filling_flags = int(getattr(info, "filling_mode", 0) or 0)
+            mappings = [
+                (getattr(mt5, "SYMBOL_FILLING_IOC", 2), mt5.ORDER_FILLING_IOC),
+                (getattr(mt5, "SYMBOL_FILLING_FOK", 1), mt5.ORDER_FILLING_FOK),
+                (getattr(mt5, "SYMBOL_FILLING_BOC", 4), getattr(mt5, "ORDER_FILLING_BOC", mt5.ORDER_FILLING_RETURN)),
+            ]
+            for flag, order_mode in mappings:
+                if filling_flags & int(flag):
+                    candidates.append(order_mode)
+
+        # Brokers can expose incomplete metadata. Probe known MT5 order filling modes with
+        # order_check and use only a mode that the broker explicitly accepts.
+        candidates.extend([mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN])
+        unique: list[int] = []
+        for candidate in candidates:
+            if candidate not in unique:
+                unique.append(candidate)
+
+        failures = []
+        for candidate in unique:
+            candidate_request = {**request, "type_filling": candidate}
+            check = mt5.order_check(candidate_request)
+            if check is not None and check.retcode == 0:
+                return candidate
+            failures.append(getattr(check, "comment", str(mt5.last_error())) if check else str(mt5.last_error()))
+
+        raise RuntimeError(f"No broker-supported filling mode was accepted for {symbol}: {' | '.join(failures)}")
+
     def send_order(
         self,
         symbol: str,
@@ -435,13 +467,13 @@ class MT5ExecutionEngine:
             "magic": 240300,
             "comment": "AURA Terminal",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
         }
+        request["type_filling"] = self._select_filling_mode(symbol, request)
 
         check = mt5.order_check(request)
         if check is None or check.retcode != 0:
             detail = getattr(check, "comment", "Unknown order check failure") if check else mt5.last_error()
-            raise RuntimeError(f"MT5 order check failed: {detail}")
+            raise RuntimeError(f"MT5 order check failed after filling-mode selection: {detail}")
 
         result = mt5.order_send(request)
         if result is None:
