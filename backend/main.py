@@ -95,7 +95,13 @@ class BacktestRequest(BaseModel):
 
 def capabilities() -> dict:
     news_guard = calendar_service.status(settings.default_symbol)
-    live_ready = settings.live_execution_enabled and broker.connected and bool(settings.execution_api_key)
+    live_ready = (
+        settings.live_execution_enabled
+        and broker.connected
+        and bool(settings.execution_api_key)
+        and bool(news_guard.get("configured"))
+        and bool(news_guard.get("safe"))
+    )
     return {
         "paper_execution": settings.execution_mode == "paper",
         "live_execution": live_ready,
@@ -311,6 +317,12 @@ async def auto_trade_status():
         blockers.append("EXECUTION_KEY_REQUIRED")
     if not news_guard["configured"]:
         blockers.append("NEWS_GUARD_REQUIRED")
+    elif news_guard.get("provider_error"):
+        blockers.append("NEWS_GUARD_UNHEALTHY")
+    elif news_guard.get("active"):
+        blockers.append("NEWS_EMBARGO_ACTIVE")
+    elif not news_guard.get("safe"):
+        blockers.append("NEWS_GUARD_UNHEALTHY")
     blockers.append("AUTOPILOT_WORKER_NOT_DEPLOYED")
     return {
         "enabled": False,
