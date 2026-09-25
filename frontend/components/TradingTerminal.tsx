@@ -241,6 +241,27 @@ function formatPct(value?: number | null) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
+function assetClassLabel(symbol: string, t: any) {
+  if (['EURUSD', 'GBPUSD', 'USDJPY'].includes(symbol)) return t.forex;
+  if (symbol === 'XAUUSD') return t.metals;
+  if (['BTCUSD', 'ETHUSD'].includes(symbol)) return t.crypto;
+  if (['NAS100', 'SP500'].includes(symbol)) return t.indices;
+  if (symbol === 'USOIL') return t.commodities;
+  return t.markets;
+}
+
+function utcClock() {
+  return new Date().toLocaleTimeString([], { hour12: false, timeZone: 'UTC' });
+}
+
+function symbolGlyph(symbol: string) {
+  const glyphs: Record<string, string> = {
+    EURUSD: '€', GBPUSD: '£', USDJPY: '¥', XAUUSD: 'Au',
+    BTCUSD: '₿', ETHUSD: 'Ξ', NAS100: 'NQ', USOIL: 'WTI', SP500: 'S&P',
+  };
+  return glyphs[symbol] || symbol.slice(0, 2);
+}
+
 function pnlClass(value: number) {
   if (value > 0) return 'text-[#2ae9bd]';
   if (value < 0) return 'text-[#ff536d]';
@@ -274,12 +295,17 @@ function TinySparkline({ values, positive }: { values: number[]; positive: boole
   );
 }
 
-function TerminalChart({ candles, signal, source }: { candles: Candle[]; signal: Signal; source: string }) {
+function TerminalChart({ candles, signal, source, streamState, t }: { candles: Candle[]; signal: Signal; source: string; streamState: StreamState; t: any }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const priceLinesRef = useRef<any[]>([]);
   const last = candles[candles.length - 1];
+  const hasSweep = !!signal.checklist.sweep;
+  const hasFvg = !!signal.checklist.fvg_midpoint;
+  const hasDisplacement = !!signal.checklist.displacement;
+  const hasKillzone = !!signal.checklist.killzone_active;
+  const hasValidatedStructure = signal.status === 'A_PLUS_SETUP' && hasSweep && hasFvg && hasDisplacement;
 
   useEffect(() => {
     if (!ref.current) return;
@@ -342,28 +368,28 @@ function TerminalChart({ candles, signal, source }: { candles: Candle[]; signal:
       <div className="absolute inset-0 aura-grid-bg" />
       <div ref={ref} className="absolute inset-0" />
 
-      <div className="pointer-events-none absolute left-2 top-2 z-20 flex items-center gap-2 text-[10px] md:left-11 md:top-3">
-        <span className="flex items-center gap-1.5 text-[#2ae9bd]"><span className="aura-live-dot h-1.5 w-1.5 rounded-full bg-[#2ae9bd]" />{source === 'MT5' ? 'Live' : 'Simulation'}</span>
-        <span className="text-[#466079]">•</span><span className="text-[#8ca0b4]">Forex</span><span className="text-[#466079]">•</span><span className="text-[#8ca0b4]">{source}</span>
+      <div className="pointer-events-none absolute left-2 top-2 z-20 flex max-w-[calc(100%_-_16px)] items-center gap-2 overflow-hidden text-[10px] md:left-11 md:top-3">
+        <span className={`flex shrink-0 items-center gap-1.5 ${streamState === 'connected' ? 'text-[#2ae9bd]' : streamState === 'reconnecting' ? 'text-[#ffb14a]' : 'text-[#ff536d]'}`}><span className={`h-1.5 w-1.5 rounded-full ${streamState === 'connected' ? 'aura-live-dot bg-[#2ae9bd]' : streamState === 'reconnecting' ? 'bg-[#ffb14a]' : 'bg-[#ff536d]'}`} />{streamState === 'connected' ? (source === 'MT5' ? t.connected : t.simulation) : streamState === 'reconnecting' ? t.reconnecting : t.offline}</span>
+        <span className="text-[#466079]">•</span><span className="shrink-0 text-[#8ca0b4]">{assetClassLabel(signal.symbol, t)}</span><span className="text-[#466079]">•</span><span className="truncate text-[#8ca0b4]">{source}</span>
         {last && <span className="hidden force-ltr text-[#28dab6] lg:inline">O {formatPrice(last.open, signal.symbol)} &nbsp; H {formatPrice(last.high, signal.symbol)} &nbsp; L {formatPrice(last.low, signal.symbol)} &nbsp; C {formatPrice(last.close, signal.symbol)}</span>}
       </div>
 
-      <div className="pointer-events-none absolute left-[14%] top-[18%] z-10 w-[34%]">
-        <span className="mb-1.5 block text-[10px] text-[#c7d6e3]">Liquidity Sweep</span>
+      {hasSweep && <div className="pointer-events-none absolute left-[14%] top-[18%] z-10 w-[34%]">
+        <span className="mb-1.5 block text-[10px] text-[#c7d6e3]">{t.liquiditySweep}</span>
         <div className="aura-zone h-7" />
-      </div>
-      <div className="pointer-events-none absolute left-[6%] top-[42%] z-10 w-[16%]">
-        <div className="aura-zone h-5"><span className="absolute right-1 top-1 text-[8px] text-[#aec4d9]">FVG</span></div>
-      </div>
-      <div className="pointer-events-none absolute left-[39%] top-[56%] z-10 w-[37%]">
-        <div className="aura-zone h-8"><span className="absolute left-2 top-2 text-[9px] text-[#d2ddec]">Demand Zone</span></div>
-      </div>
-      <div className="pointer-events-none absolute left-[58%] top-[39%] z-10 flex items-center gap-2 text-[9px] text-[#c6d6e5]">
-        <span>BOS</span><span className="h-px w-11 bg-[#9ac8ee]/70" />
-      </div>
-      <div className="pointer-events-none absolute bottom-[21%] right-[14%] top-0 z-[5] w-[16%] aura-killzone">
-        <div className="mt-8 text-center text-[9px] text-[#d5cef9]">Killzone ({signal.checklist.session_name || signal.session || 'London'})</div>
-      </div>
+      </div>}
+      {hasFvg && <div className="pointer-events-none absolute left-[6%] top-[42%] z-10 w-[16%]">
+        <div className="aura-zone h-5"><span className="absolute right-1 top-1 text-[8px] text-[#aec4d9] rtl:left-1 rtl:right-auto">{t.fvg}</span></div>
+      </div>}
+      {hasValidatedStructure && <div className="pointer-events-none absolute left-[39%] top-[56%] z-10 w-[37%]">
+        <div className="aura-zone h-8"><span className="absolute left-2 top-2 text-[9px] text-[#d2ddec] rtl:left-auto rtl:right-2">{t.demandZone}</span></div>
+      </div>}
+      {hasDisplacement && <div className="pointer-events-none absolute left-[58%] top-[39%] z-10 flex items-center gap-2 text-[9px] text-[#c6d6e5]">
+        <span>{t.breakOfStructure}</span><span className="h-px w-11 bg-[#9ac8ee]/70" />
+      </div>}
+      {hasKillzone && <div className="pointer-events-none absolute bottom-[21%] right-[14%] top-0 z-[5] w-[16%] aura-killzone rtl:left-[14%] rtl:right-auto">
+        <div className="mt-8 text-center text-[9px] text-[#d5cef9]">{t.killzone} ({signal.checklist.session_name || signal.session || '—'})</div>
+      </div>}
 
       <div className="pointer-events-none absolute bottom-[3px] left-0 right-0 z-10 h-[21%] border-t border-[#173047]/70 bg-[#03101a]/88 px-4 pt-2">
         <svg className="h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -379,9 +405,17 @@ function TerminalChart({ candles, signal, source }: { candles: Candle[]; signal:
         </svg>
       </div>
 
-      <div className="absolute bottom-[22%] left-2 z-20 hidden flex-col gap-2 md:flex">
+      {!candles.length && <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+        <div className="rounded-lg border border-[#17344e] bg-[#06131f]/92 px-4 py-3 text-center shadow-2xl backdrop-blur-sm">
+          <div className={`mx-auto mb-2 h-2 w-2 rounded-full ${streamState === 'offline' ? 'bg-[#ff536d]' : 'aura-live-dot bg-[#2ae9bd]'}`} />
+          <div className="text-[10px] font-medium text-[#d8e5ef]">{streamState === 'offline' ? t.marketDataUnavailable : t.marketLoading}</div>
+          <div className="mt-1 text-[8px] text-[#60768b]">{streamState === 'reconnecting' ? t.reconnecting : source}</div>
+        </div>
+      </div>}
+
+      <div className="absolute bottom-[22%] left-2 z-20 hidden flex-col gap-2 md:flex rtl:left-auto rtl:right-2">
         {[Crosshair, LineChart, Target, SlidersHorizontal, Layers3, Gauge, Search].map((Icon, i) => (
-          <button key={i} className="flex h-7 w-7 items-center justify-center rounded text-[#7790a8] hover:bg-[#0b2134] hover:text-white" aria-label={`Chart tool ${i + 1}`}>
+          <button key={i} className="flex h-7 w-7 items-center justify-center rounded text-[#7790a8] hover:bg-[#0b2134] hover:text-white" aria-label={`${t.chartTool} ${i + 1}`}>
             <Icon className="h-3.5 w-3.5" />
           </button>
         ))}
@@ -493,20 +527,20 @@ function WatchlistStrip({ items, selectedSymbol, setSelectedSymbol }: { items: M
   );
 }
 
-function ChartHeader({ symbol }: { symbol: string }) {
+function ChartHeader({ symbol, t }: { symbol: string; t: any }) {
   return (
     <div className="flex h-[43px] shrink-0 items-center border-b border-[#173047]/70 bg-[#04111c]">
       <div className="flex h-full min-w-[145px] items-center gap-3 border-r border-[#173047]/70 px-3 rtl:border-l rtl:border-r-0">
-        <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[#2b74b4] bg-[#123660] text-[11px] font-bold text-[#7ec0ff]">€</div>
-        <div><div className="aura-mono text-[12px] font-semibold text-white">{symbol}</div><div className="text-[8px] text-[#6f8498]">{symbol === 'EURUSD' ? 'Euro / U.S. Dollar' : 'AURA Market'}</div></div>
+        <div className="flex h-7 min-w-7 items-center justify-center rounded-full border border-[#2b74b4] bg-[#123660] px-1 text-[9px] font-bold text-[#7ec0ff]">{symbolGlyph(symbol)}</div>
+        <div><div className="aura-mono text-[12px] font-semibold text-white">{symbol}</div><div className="text-[8px] text-[#6f8498]">{symbol === 'EURUSD' ? 'Euro / U.S. Dollar' : `AURA · ${assetClassLabel(symbol, t)}`}</div></div>
       </div>
       <div className="aura-thin-scroll flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 text-[9px] text-[#8499ad]">
         {['1m','5m','15m','1h','4h','D'].map(tf => <button key={tf} className={`rounded px-2 py-1.5 ${tf === '15m' ? 'bg-[#14304a] text-white' : 'hover:bg-[#0c2133] hover:text-white'}`}>{tf}</button>)}
         <ChevronDown className="h-3 w-3" />
         <span className="mx-1 h-5 w-px bg-[#163047]" />
-        <button className="flex items-center gap-1 rounded px-2 py-1.5 hover:bg-[#0c2133]"><Activity className="h-3 w-3" />Indicators</button>
-        <button className="hidden items-center gap-1 rounded px-2 py-1.5 hover:bg-[#0c2133] lg:flex"><Layers3 className="h-3 w-3" />Templates</button>
-        <button className="hidden items-center gap-1 rounded px-2 py-1.5 hover:bg-[#0c2133] lg:flex"><RefreshCcw className="h-3 w-3" />Replay</button>
+        <button className="flex items-center gap-1 rounded px-2 py-1.5 hover:bg-[#0c2133]"><Activity className="h-3 w-3" />{t.indicators}</button>
+        <button className="hidden items-center gap-1 rounded px-2 py-1.5 hover:bg-[#0c2133] lg:flex"><Layers3 className="h-3 w-3" />{t.templates}</button>
+        <button className="hidden items-center gap-1 rounded px-2 py-1.5 hover:bg-[#0c2133] lg:flex"><RefreshCcw className="h-3 w-3" />{t.replay}</button>
       </div>
       <div className="flex h-full items-center gap-1 border-l border-[#173047]/70 px-2 rtl:border-l-0 rtl:border-r">
         {[Crosshair, SlidersHorizontal, MoreHorizontal].map((Icon, i) => <button key={i} className="flex h-7 w-7 items-center justify-center rounded text-[#7f94a8] hover:bg-[#0c2133] hover:text-white"><Icon className="h-3.5 w-3.5" /></button>)}
@@ -569,7 +603,7 @@ function StatusColumn({ runtime, portfolio, signal, sizing, riskPercent, t }: { 
     <div className="hidden min-w-0 flex-col gap-2 xl:flex">
       <section className="aura-panel rounded-lg p-3.5">
         <div className="flex items-center justify-between"><h3 className="text-[12px] font-semibold text-white">{t.marketStatus}</h3><span className={`flex items-center gap-1 rounded px-2 py-1 text-[8px] font-semibold ${runtime.execution_mode === 'LIVE' ? 'bg-[#0c553f]/50 text-[#2ae9bd]' : 'bg-[#173a5f] text-[#78bfff]'}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{runtime.execution_mode === 'LIVE' ? t.live : t.paper}</span></div>
-        <div className="mt-3 grid grid-cols-2 gap-y-4 text-[9px]"><div><div className="text-[#71869b]">{t.spread}</div><div className="mt-1 aura-mono text-[11px] text-white">{typeof market?.spread_points === 'number' ? `${market.spread_points.toFixed(1)} pt` : '—'}</div></div><div><div className="text-[#71869b]">{t.volatility}</div><div className={`mt-1 text-[11px] ${volatilityClass}`}>{volatilityState === 'UNAVAILABLE' ? '—' : `${volatilityState} · ${(market?.volatility_percent || 0).toFixed(3)}%`}</div></div><div><div className="text-[#71869b]">{t.session}</div><div className="mt-1 text-[11px] text-white">{session}</div></div><div><div className="text-[#71869b]">{t.killzoneActive}</div><div className="mt-1 text-[11px] text-white">{signal.checklist.killzone_active ? 'Active' : '—'}</div></div></div>
+        <div className="mt-3 grid grid-cols-2 gap-y-4 text-[9px]"><div><div className="text-[#71869b]">{t.spread}</div><div className="mt-1 aura-mono text-[11px] text-white">{typeof market?.spread_points === 'number' ? `${market.spread_points.toFixed(1)} pt` : '—'}</div></div><div><div className="text-[#71869b]">{t.volatility}</div><div className={`mt-1 text-[11px] ${volatilityClass}`}>{volatilityState === 'UNAVAILABLE' ? '—' : `${volatilityState} · ${(market?.volatility_percent || 0).toFixed(3)}%`}</div></div><div><div className="text-[#71869b]">{t.session}</div><div className="mt-1 text-[11px] text-white">{session}</div></div><div><div className="text-[#71869b]">{t.killzoneActive}</div><div className="mt-1 text-[11px] text-white">{signal.checklist.killzone_active ? t.active : '—'}</div></div></div>
       </section>
       <section className="aura-panel rounded-lg p-3.5">
         <div className="flex items-center justify-between"><h3 className="text-[12px] font-semibold text-white">{t.newsGuard}</h3><span className={`flex items-center gap-1 rounded px-2 py-1 text-[8px] font-semibold ${runtime.news_guard.configured ? 'bg-[#0c553f]/50 text-[#2ae9bd]' : 'bg-[#3c2f1b] text-[#e6b866]'}`}><ShieldCheck className="h-3 w-3" />{runtime.news_guard.configured ? t.safe : t.notConfigured}</span></div>
@@ -626,7 +660,7 @@ function RecentSignals({ signal, portfolio, t }: { signal: Signal; portfolio: Po
   );
 }
 
-function MobileTerminalView({ candles, signal, runtime, portfolio, sizing, riskPercent, setRiskPercent, executing, onExecute, t }: { candles: Candle[]; signal: Signal; runtime: RuntimeState; portfolio: Portfolio; sizing: PositionSizePreview | null; riskPercent: number; setRiskPercent: (v: number) => void; executing: boolean; onExecute: () => void; t: any }) {
+function MobileTerminalView({ candles, signal, runtime, portfolio, sizing, riskPercent, setRiskPercent, executing, onExecute, streamState, t }: { candles: Candle[]; signal: Signal; runtime: RuntimeState; portfolio: Portfolio; sizing: PositionSizePreview | null; riskPercent: number; setRiskPercent: (v: number) => void; executing: boolean; onExecute: () => void; streamState: StreamState; t: any }) {
   const ready = signal.status === 'A_PLUS_SETUP' && !!signal.action;
   return (
     <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] px-3 pb-24 pt-3 md:hidden">
@@ -646,7 +680,7 @@ function MobileTerminalView({ candles, signal, runtime, portfolio, sizing, riskP
             <div className="pl-2 rtl:pl-0 rtl:pr-2"><div className="text-[8px] text-[#70869a]">{t.takeProfit}</div><div className="mt-1 aura-mono text-[11px] text-[#2ae9bd]">{formatPrice(signal.tp, signal.symbol)}</div></div>
           </div>
         </div>
-        <div className="h-[285px] border-t border-[#173047]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} /></div>
+        <div className="h-[285px] border-t border-[#173047]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} streamState={streamState} t={t} /></div>
         <div className="aura-thin-scroll flex items-center gap-2 overflow-x-auto border-t border-[#173047] px-3 py-2 text-[9px] text-[#7f94a8]">{['5m','15m','1h','4h','D'].map(tf => <button key={tf} className={`rounded px-3 py-1.5 ${tf === '15m' ? 'bg-[#153958] text-white' : 'bg-[#071522]'}`}>{tf}</button>)}</div>
         <div className="p-3"><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizing} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={onExecute} t={t} /></div>
       </section>
@@ -821,14 +855,14 @@ export default function TradingTerminal() {
         <WatchlistStrip items={markets} selectedSymbol={selectedSymbol} setSelectedSymbol={(s) => { setSelectedSymbol(s); setView('terminal'); }} />
 
         {view === 'markets' ? <MarketsView items={markets} selectedSymbol={selectedSymbol} setSelectedSymbol={(s) => { setSelectedSymbol(s); setView('terminal'); }} t={t} /> : view === 'backtesting' ? <BacktestingView selectedMarket={selectedMarket} t={t} /> : isMobile ? (
-          <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} />
+          <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} streamState={streamState} t={t} />
         ) : (
           <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] p-2 pb-20 md:p-2.5 xl:pb-2.5">
             <div className="aura-command-grid grid min-h-[510px] gap-2 lg:grid-cols-[minmax(0,1fr)_292px] xl:grid-cols-[minmax(0,1fr)_300px_210px]">
               <section className="aura-panel min-w-0 overflow-hidden rounded-lg">
-                <ChartHeader symbol={selectedSymbol} />
-                <div className="h-[395px] min-h-[330px] xl:h-[425px]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} /></div>
-                <div className="flex h-8 items-center justify-between border-t border-[#173047]/70 bg-[#04111c] px-3 text-[8px] text-[#71869b]"><div className="flex gap-4"><span>1D</span><span>5D</span><span>1M</span><span>3M</span><span>6M</span><span>YTD</span><span>1Y</span><span>All</span></div><div className="flex items-center gap-3"><span className="hidden sm:inline">{new Date().toLocaleTimeString([], { hour12: false })} (UTC)</span><span>%</span><span className="text-[#54a9ed]">log</span><span className="text-[#54a9ed]">auto</span></div></div>
+                <ChartHeader symbol={selectedSymbol} t={t} />
+                <div className="h-[395px] min-h-[330px] xl:h-[425px]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} streamState={streamState} t={t} /></div>
+                <div className="flex h-8 items-center justify-between border-t border-[#173047]/70 bg-[#04111c] px-3 text-[8px] text-[#71869b]"><div className="flex gap-4"><span>1D</span><span>5D</span><span>1M</span><span>3M</span><span>6M</span><span>YTD</span><span>1Y</span><span>All</span></div><div className="flex items-center gap-3"><span className="hidden sm:inline">{utcClock()} (UTC)</span><span>%</span><span className="text-[#54a9ed]">log</span><span className="text-[#54a9ed]">auto</span></div></div>
               </section>
               <div className="grid min-w-0 gap-2 md:grid-cols-2 lg:grid-cols-1 xl:flex xl:flex-col"><SignalCard signal={signal} t={t} /><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} /></div>
               <StatusColumn runtime={runtime} portfolio={portfolio} signal={signal} sizing={sizingPreview} riskPercent={riskPercent} t={t} />
