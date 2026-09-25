@@ -41,7 +41,7 @@ class HistoricalBacktestEngine:
         if missing:
             raise ValueError(f"Historical data is missing required columns: {', '.join(missing)}")
 
-        work = df.loc[:, REQUIRED_COLUMNS].copy()
+        work = df.loc[:, list(REQUIRED_COLUMNS)].copy()
         work["time"] = pd.to_datetime(work["time"], utc=True, errors="coerce")
         for column in ("open", "high", "low", "close"):
             work[column] = pd.to_numeric(work[column], errors="coerce")
