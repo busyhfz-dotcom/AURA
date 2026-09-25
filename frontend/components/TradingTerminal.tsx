@@ -715,15 +715,209 @@ function MarketsView({ items, selectedSymbol, setSelectedSymbol, t }: { items: M
   );
 }
 
+type BacktestResult = {
+  strategy: string;
+  symbol: string;
+  timeframe: string;
+  source: string;
+  validation_level: 'BROKER_HISTORICAL' | 'SIMULATION_ONLY' | string;
+  bars: number;
+  period: { from: string; to: string };
+  assumptions: {
+    starting_balance: number;
+    risk_percent: number;
+    entry_wait_bars: number;
+    max_hold_bars: number;
+    same_bar_sl_tp_policy: string;
+    commission_model?: string | null;
+    slippage_model?: string | null;
+  };
+  metrics: {
+    ending_balance: number;
+    total_return_percent: number;
+    total_trades: number;
+    wins: number;
+    losses: number;
+    win_rate_percent?: number | null;
+    profit_factor?: number | null;
+    max_drawdown_percent: number;
+    sharpe_ratio?: number | null;
+    avg_r_multiple?: number | null;
+    expectancy?: number | null;
+    net_pnl: number;
+  };
+  equity_curve: { time: string; balance: number }[];
+  trades: {
+    action: 'BUY' | 'SELL';
+    entry_time: string;
+    exit_time: string;
+    entry: number;
+    exit_price: number;
+    exit_reason: string;
+    r_multiple: number;
+    pnl: number;
+  }[];
+};
+
 function BacktestingView({ selectedMarket, t }: { selectedMarket?: MarketItem; t: any }) {
+  const symbol = selectedMarket?.symbol || 'EURUSD';
+  const [timeframe, setTimeframe] = useState('M15');
+  const [bars, setBars] = useState(1500);
+  const [risk, setRisk] = useState(1);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<BacktestResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBase}/api/backtest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol,
+          timeframe,
+          bars,
+          starting_balance: 10000,
+          risk_percent: risk,
+          entry_wait_bars: 8,
+          max_hold_bars: 24,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Backtest failed.');
+      }
+      setResult(payload);
+    } catch (err) {
+      setResult(null);
+      setError(err instanceof Error ? err.message : 'Backtest failed.');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const equity = result?.equity_curve.map(point => point.balance) || [];
+  const metrics = result?.metrics;
+  const validationLabel = result?.validation_level === 'BROKER_HISTORICAL' ? t.backtestBrokerHistorical : t.simulation;
+
+  const metricCard = (label: string, value: React.ReactNode, accent = false) => (
+    <div className="aura-panel rounded-lg p-4">
+      <div className="text-[8px] text-[#6f8499]">{label}</div>
+      <div className={`mt-2 aura-mono text-[18px] ${accent ? 'text-[#2ae9bd]' : 'text-white'}`}>{value}</div>
+    </div>
+  );
+
   return (
-    <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] p-4 lg:p-5">
+    <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] p-4 pb-24 lg:p-5 xl:pb-5">
       <div className="mx-auto max-w-[1100px]">
-        <h1 className="text-[18px] font-semibold text-white">{t.backtestingTitle}</h1>
-        <div className="aura-panel mt-4 rounded-lg p-3"><div className="grid gap-2 md:grid-cols-[1.2fr_.7fr_1.4fr_auto]"><div><div className="mb-1 text-[8px] text-[#71869b]">{t.strategy}</div><div className="aura-field flex items-center">{t.smcInstitutional}</div></div><div><div className="mb-1 text-[8px] text-[#71869b]">{t.timeframe}</div><div className="aura-field flex items-center">H1</div></div><div><div className="mb-1 text-[8px] text-[#71869b]">Date range</div><div className="aura-field flex items-center">Historical runner not connected</div></div><button className="aura-execute self-end rounded-md px-5 py-3 text-[10px] font-semibold" disabled>{t.runBacktest}</button></div></div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[[t.totalReturn,'—'],[t.winRate,'—'],[t.profitFactor,'—'],[t.totalTrades,'—']].map(([label,value]) => <div key={String(label)} className="aura-panel rounded-lg p-4"><div className="text-[8px] text-[#6f8499]">{label}</div><div className="mt-2 aura-mono text-[22px] text-[#2ae9bd]">{value}</div></div>)}</div>
-        <section className="aura-panel mt-3 rounded-lg p-4"><div className="flex items-center justify-between"><div><div className="text-[12px] font-semibold text-white">{t.demoAnalytics}</div><div className="mt-1 text-[9px] text-[#6f8499]">{t.demoAnalyticsNote}</div></div><span className="rounded bg-[#17334e] px-2 py-1 text-[8px] text-[#8eabc2]">UI READY</span></div><div className="mt-5 h-[220px] rounded-md border border-[#173047] bg-[#03101a] p-5"><TinySparkline values={selectedMarket?.sparkline || []} positive={(selectedMarket?.change_percent || 0) >= 0} /><div className="mt-8 border-t border-[#173047]" /></div></section>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[[t.maxDrawdown,'—'],[t.sharpeRatio,'—'],[t.avgRR,'—'],[t.expectancy,'—']].map(([label,value]) => <div key={String(label)} className="aura-panel rounded-lg p-4"><div className="text-[8px] text-[#6f8499]">{label}</div><div className="mt-2 aura-mono text-[16px] text-white">{value}</div></div>)}</div>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-[18px] font-semibold text-white">{t.backtestingTitle}</h1>
+            <p className="mt-1 text-[9px] text-[#6f8499]">{t.demoAnalyticsNote}</p>
+          </div>
+          <span className="rounded-md border border-[#1b3e58] bg-[#071725] px-2 py-1 text-[8px] font-semibold text-[#8eabc2]">AURA v3.5</span>
+        </div>
+
+        <div className="aura-panel mt-4 rounded-lg p-3">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[1.2fr_.7fr_.7fr_.7fr_auto]">
+            <div>
+              <div className="mb-1 text-[8px] text-[#71869b]">{t.strategy}</div>
+              <div className="aura-field flex items-center">{t.smcInstitutional}</div>
+            </div>
+            <div>
+              <div className="mb-1 text-[8px] text-[#71869b]">{t.symbol}</div>
+              <div className="aura-field aura-mono flex items-center force-ltr">{symbol}</div>
+            </div>
+            <label>
+              <span className="mb-1 block text-[8px] text-[#71869b]">{t.timeframe}</span>
+              <select className="aura-field force-ltr" value={timeframe} onChange={e => setTimeframe(e.target.value)}>
+                {['M5','M15','M30','H1','H4'].map(value => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-1 block text-[8px] text-[#71869b]">{t.backtestBars}</span>
+              <input className="aura-field force-ltr" type="number" min={120} max={5000} step={100} value={bars} onChange={e => setBars(Math.max(120, Math.min(5000, Number(e.target.value) || 120)))} />
+            </label>
+            <button onClick={run} disabled={running} className="aura-execute self-end rounded-md px-5 py-3 text-[10px] font-semibold disabled:opacity-50">
+              {running ? t.backtestRunning : t.runBacktest}
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[8px] text-[#71869b]">
+            <span>{t.riskPercent}</span>
+            {[0.5,1].map(value => <button key={value} onClick={() => setRisk(value)} className={`rounded border px-2 py-1 ${risk === value ? 'border-[#2e93ff] bg-[#12375a] text-white' : 'border-[#173047] bg-[#071522]'}`}>{value}%</button>)}
+            <span className="mx-1 text-[#29445a]">•</span>
+            <span>{t.accountBalance}: <span className="aura-mono text-[#b8c9d8]">$10,000.00</span></span>
+          </div>
+        </div>
+
+        {error && <div className="mt-3 rounded-lg border border-[#633041] bg-[#24111a] p-3 text-[9px] text-[#ff8394]">{error}</div>}
+
+        {!result ? (
+          <section className="aura-panel mt-3 rounded-lg p-5">
+            <div className="flex min-h-[280px] items-center justify-center text-center">
+              <div>
+                <BarChart3 className="mx-auto h-8 w-8 text-[#365069]" />
+                <div className="mt-3 text-[11px] font-medium text-[#b8c8d5]">{t.backtestResults}</div>
+                <div className="mt-1 max-w-[500px] text-[8px] leading-4 text-[#60768b]">{t.demoAnalyticsNote}</div>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#173047] bg-[#05121e] px-3 py-2 text-[8px]">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-[#70869a]">{t.backtestSource}</span>
+                <span className={`rounded px-2 py-1 font-semibold ${result.validation_level === 'BROKER_HISTORICAL' ? 'bg-[#0b493a] text-[#2ae9bd]' : 'bg-[#3c2f1b] text-[#e6b866]'}`}>{validationLabel} · {result.source}</span>
+                <span className="text-[#70869a]">{result.bars} {t.backtestBars.toLowerCase()}</span>
+              </div>
+              <div className="aura-mono force-ltr text-[#8ea4b8]">{new Date(result.period.from).toLocaleString()} → {new Date(result.period.to).toLocaleString()}</div>
+            </div>
+
+            {result.validation_level !== 'BROKER_HISTORICAL' && (
+              <div className="mt-2 rounded-lg border border-[#5b4725] bg-[#211a0d] px-3 py-2 text-[8px] leading-4 text-[#e3bd78]">
+                <AlertTriangle className="mr-2 inline h-3.5 w-3.5 rtl:ml-2 rtl:mr-0" />{t.backtestSimulationWarning}
+              </div>
+            )}
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {metricCard(t.totalReturn, metrics ? `${metrics.total_return_percent >= 0 ? '+' : ''}${metrics.total_return_percent.toFixed(2)}%` : '—', true)}
+              {metricCard(t.winRate, typeof metrics?.win_rate_percent === 'number' ? `${metrics.win_rate_percent.toFixed(2)}%` : '—')}
+              {metricCard(t.profitFactor, typeof metrics?.profit_factor === 'number' ? metrics.profit_factor.toFixed(3) : '—')}
+              {metricCard(t.totalTrades, metrics?.total_trades ?? '—')}
+            </div>
+
+            <section className="aura-panel mt-3 rounded-lg p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-[12px] font-semibold text-white">{t.demoAnalytics}</div>
+                  <div className="mt-1 text-[9px] text-[#6f8499]">{t.backtestPeriod}: {result.timeframe} · {result.symbol}</div>
+                </div>
+                <div className="aura-mono text-right text-[9px] rtl:text-left">
+                  <div className="text-[#71869b]">{t.equity}</div>
+                  <div className={pnlClass(metrics?.net_pnl || 0)}>{formatMoney(metrics?.ending_balance)} · {formatMoney(metrics?.net_pnl)}</div>
+                </div>
+              </div>
+              <div className="mt-4 h-[220px] rounded-md border border-[#173047] bg-[#03101a] p-5">
+                {equity.length > 1 ? <TinySparkline values={equity} positive={(metrics?.net_pnl || 0) >= 0} /> : <div className="flex h-full items-center justify-center text-[9px] text-[#60768b]">{t.backtestNoTrades}</div>}
+                <div className="mt-8 border-t border-[#173047]" />
+              </div>
+            </section>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {metricCard(t.maxDrawdown, metrics ? `${metrics.max_drawdown_percent.toFixed(2)}%` : '—')}
+              {metricCard(t.sharpeRatio, typeof metrics?.sharpe_ratio === 'number' ? metrics.sharpe_ratio.toFixed(3) : '—')}
+              {metricCard(t.avgRR, typeof metrics?.avg_r_multiple === 'number' ? `${metrics.avg_r_multiple.toFixed(2)}R` : '—')}
+              {metricCard(t.expectancy, typeof metrics?.expectancy === 'number' ? formatMoney(metrics.expectancy) : '—')}
+            </div>
+
+            <section className="aura-panel mt-3 overflow-hidden rounded-lg">
+              <div className="border-b border-[#173047] px-4 py-3 text-[11px] font-semibold text-white">{t.history} <span className="text-[#60768b]">({result.trades.length})</span></div>
+              {result.trades.length ? <div className="aura-thin-scroll overflow-x-auto"><table className="w-full min-w-[760px] text-left text-[9px] rtl:text-right"><thead><tr className="border-b border-[#173047] text-[#71869b]"><th className="px-3 py-2">{t.time}</th><th className="px-3 py-2">{t.type}</th><th className="px-3 py-2">{t.entry}</th><th className="px-3 py-2">{t.exit}</th><th className="px-3 py-2">R</th><th className="px-3 py-2">{t.realizedPnl}</th><th className="px-3 py-2">{t.status}</th></tr></thead><tbody>{result.trades.slice().reverse().slice(0,50).map((trade,index) => <tr key={`${trade.entry_time}-${index}`} className="border-b border-[#10283c] text-[#d3dee8]"><td className="px-3 py-2 text-[#71869b]">{new Date(trade.entry_time).toLocaleString()}</td><td className={`px-3 py-2 font-semibold ${trade.action === 'BUY' ? 'text-[#2ae9bd]' : 'text-[#ff536d]'}`}>{trade.action}</td><td className="px-3 py-2 aura-mono">{formatPrice(trade.entry,result.symbol)}</td><td className="px-3 py-2 aura-mono">{formatPrice(trade.exit_price,result.symbol)}</td><td className={`px-3 py-2 aura-mono ${pnlClass(trade.r_multiple)}`}>{trade.r_multiple.toFixed(2)}R</td><td className={`px-3 py-2 aura-mono ${pnlClass(trade.pnl)}`}>{formatMoney(trade.pnl)}</td><td className="px-3 py-2 text-[#8fa5b8]">{trade.exit_reason}</td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-[9px] text-[#60768b]">{t.backtestNoTrades}</div>}
+            </section>
+          </>
+        )}
       </div>
     </main>
   );
