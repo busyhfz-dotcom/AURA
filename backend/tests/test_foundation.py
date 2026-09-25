@@ -33,6 +33,10 @@ class AuraFoundationTests(unittest.TestCase):
             economic_calendar_api_key=None,
             news_embargo_before_minutes=30,
             news_embargo_after_minutes=15,
+            live_execution_transport="worker",
+            execution_worker_url=None,
+            execution_worker_secret=None,
+            execution_worker_timeout_seconds=10,
         )
 
     def test_engine_never_invents_setup_when_data_is_missing(self):
@@ -70,6 +74,24 @@ class AuraFoundationTests(unittest.TestCase):
         self.assertIsNone(status["spread"])
         self.assertIsNone(status["spread_points"])
         self.assertIsNotNone(status["volatility_percent"])
+
+    def test_execution_idempotency_replays_same_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = AuraLedger(os.path.join(tmp, "aura.db"), 10_000)
+            first = ledger.reserve_execution_request("exec-12345678", "hash-a")
+            self.assertTrue(first["is_new"])
+            ledger.complete_execution_request("exec-12345678", {"status": "PAPER_FILLED", "order_id": "PAPER-1"})
+            replay = ledger.reserve_execution_request("exec-12345678", "hash-a")
+            self.assertFalse(replay["is_new"])
+            self.assertEqual(replay["state"], "COMPLETED")
+            self.assertEqual(replay["result"]["order_id"], "PAPER-1")
+
+    def test_execution_idempotency_rejects_key_reuse_with_different_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = AuraLedger(os.path.join(tmp, "aura.db"), 10_000)
+            ledger.reserve_execution_request("exec-12345678", "hash-a")
+            with self.assertRaises(ValueError):
+                ledger.reserve_execution_request("exec-12345678", "hash-b")
 
     def test_ledger_persists_order_and_position(self):
         with tempfile.TemporaryDirectory() as tmp:
