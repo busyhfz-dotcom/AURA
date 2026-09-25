@@ -506,6 +506,7 @@ async def risk_preview(request: SizingRequest):
 async def execute_trade(
     trade: ExecutionRequest,
     x_aura_execution_key: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     symbol = trade.symbol.upper().strip()
 
@@ -523,6 +524,11 @@ async def execute_trade(
                 metadata={"symbol": symbol},
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid operator execution key.")
+        if not idempotency_key:
+            raise HTTPException(
+                status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+                detail="Live execution requires an Idempotency-Key header.",
+            )
 
     news_guard = calendar_service.status(symbol)
     if settings.live_execution_enabled and not news_guard.get("configured"):
@@ -554,44 +560,162 @@ async def execute_trade(
             detail={"code": decision.code, "message": decision.message},
         )
 
-    if settings.live_execution_enabled and not broker.connected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=broker.connection_reason or "Live broker is not connected.",
-        )
+    request_payload = {
+        "symbol": symbol,
+        "action": trade.action,
+        "entry": trade.entry,
+        "sl": trade.sl,
+        "tp": trade.tp,
+        "risk_percent": trade.risk_percent,
+        "mode": settings.execution_mode,
+        "transport": settings.live_execution_transport if settings.live_execution_enabled else "paper",
+    }
+    request_hash = hashlib.sha256(
+        json.dumps(request_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    reservation = None
+    if idempotency_key:
+        try:
+            reservation = ledger.reserve_execution_request(idempotency_key, request_hash)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+        if reservation["state"] == "COMPLETED" and reservation.get("result"):
+            return {**reservation["result"], "idempotent_replay": True}
+        if reservation["state"] == "FAILED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=reservation.get("error_message") or "This execution key is bound to a failed request. Use a new key after review.",
+            )
+        if not reservation.get("is_new") and settings.live_execution_transport != "worker":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Execution is already pending or unknown. Direct MT5 requests are not retried automatically.",
+            )
 
     if settings.live_execution_enabled:
+        transport = _live_transport_health()
+        if not transport.get("connected"):
+            detail = transport.get("reason") or "Live execution transport is unavailable."
+            if idempotency_key:
+                ledger.fail_execution_request(idempotency_key, detail)
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+
         try:
-            live_positions = broker.live_positions()
+            live_positions = _live_positions()
         except RuntimeError as exc:
+            if idempotency_key:
+                ledger.fail_execution_request(idempotency_key, str(exc))
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
         if len(live_positions) >= settings.max_open_positions:
+            if idempotency_key:
+                ledger.fail_execution_request(idempotency_key, "Live broker position limit reached.")
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
                 detail={"code": "MAX_OPEN_POSITIONS", "message": "Live broker position limit reached."},
             )
-        if any(position["symbol"].upper() == symbol for position in live_positions):
+        if any(str(position.get("symbol", "")).upper() == symbol for position in live_positions):
+            if idempotency_key:
+                ledger.fail_execution_request(idempotency_key, f"Open {symbol} position already exists.")
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
-                detail={"code": "DUPLICATE_SYMBOL", "message": f"MT5 already has an open {symbol} position."},
+                detail={"code": "DUPLICATE_SYMBOL", "message": f"Live broker already has an open {symbol} position."},
             )
 
     try:
-        result = broker.send_order(
-            symbol=symbol,
-            action=trade.action,
-            entry=trade.entry,
-            sl=trade.sl,
-            tp=trade.tp,
-            risk_percent=trade.risk_percent,
-            paper_balance=ledger.metrics()["balance"] if settings.execution_mode == "paper" else None,
-        )
+        if settings.live_execution_enabled and settings.live_execution_transport == "worker":
+            if not idempotency_key:
+                raise RuntimeError("Worker execution requires an idempotency key.")
+            result = execution_worker.execute({
+                "idempotency_key": idempotency_key,
+                "symbol": symbol,
+                "action": trade.action,
+                "entry": trade.entry,
+                "sl": trade.sl,
+                "tp": trade.tp,
+                "risk_percent": min(trade.risk_percent, settings.max_risk_percent),
+            })
+        else:
+            result = broker.send_order(
+                symbol=symbol,
+                action=trade.action,
+                entry=trade.entry,
+                sl=trade.sl,
+                tp=trade.tp,
+                risk_percent=trade.risk_percent,
+                paper_balance=ledger.metrics()["balance"] if settings.execution_mode == "paper" else None,
+            )
+
         refs = ledger.record_execution(result)
-        return {**result, **refs, "risk_guard": risk_guard.status()}
+        response_payload = {**result, **refs, "risk_guard": risk_guard.status()}
+        if idempotency_key:
+            ledger.complete_execution_request(idempotency_key, response_payload)
+        return response_payload
     except ValueError as exc:
+        if idempotency_key:
+            ledger.fail_execution_request(idempotency_key, str(exc))
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except RuntimeError as exc:
-        ledger.add_audit("execution.error", str(exc), severity="error", metadata={"symbol": symbol})
+        if idempotency_key:
+            if settings.live_execution_enabled:
+                ledger.mark_execution_request_unknown(idempotency_key, str(exc))
+            else:
+                ledger.fail_execution_request(idempotency_key, str(exc))
+        ledger.add_audit(
+            "execution.error",
+            str(exc),
+            severity="error",
+            metadata={"symbol": symbol, "idempotency_key": idempotency_key, "transport": settings.live_execution_transport},
+        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@app.get("/api/live/positions")
+async def live_positions(x_aura_execution_key: str | None = Header(default=None)):
+    if not settings.live_execution_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="AURA is not in live execution mode.")
+    if x_aura_execution_key != settings.execution_api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid operator execution key.")
+    try:
+        return {"transport": settings.live_execution_transport, "positions": _live_positions()}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@app.post("/api/live/positions/close")
+async def close_live_position(
+    request: LiveCloseRequest,
+    x_aura_execution_key: str | None = Header(default=None),
+):
+    if not settings.live_execution_enabled or settings.live_execution_transport != "worker":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Live close requires isolated worker transport.")
+    if x_aura_execution_key != settings.execution_api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid operator execution key.")
+    try:
+        result = execution_worker.close_position(request.ticket, request.volume)
+        ledger.add_audit("live.position_closed", f"Live MT5 position {request.ticket} close confirmed.", metadata=result)
+        return result
+    except RuntimeError as exc:
+        ledger.add_audit("live.close_error", str(exc), severity="error", metadata={"ticket": request.ticket})
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@app.post("/api/live/positions/modify")
+async def modify_live_position(
+    request: LiveModifyRequest,
+    x_aura_execution_key: str | None = Header(default=None),
+):
+    if not settings.live_execution_enabled or settings.live_execution_transport != "worker":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Live modify requires isolated worker transport.")
+    if x_aura_execution_key != settings.execution_api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid operator execution key.")
+    try:
+        result = execution_worker.modify_position(request.ticket, request.sl, request.tp)
+        ledger.add_audit("live.position_modified", f"Live MT5 position {request.ticket} protection updated.", metadata=result)
+        return result
+    except RuntimeError as exc:
+        ledger.add_audit("live.modify_error", str(exc), severity="error", metadata={"ticket": request.ticket})
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
