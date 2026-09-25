@@ -120,6 +120,7 @@ type RuntimeState = {
   execution_mode: 'PAPER' | 'LIVE';
   market_data_source: string;
   market_status?: MarketStatus;
+  max_risk_percent?: number;
   active_session: string;
   broker: { connected: boolean; provider: string; reason?: string | null };
   capabilities: {
@@ -200,6 +201,7 @@ const EMPTY_SIGNAL: Signal = {
 const EMPTY_RUNTIME: RuntimeState = {
   execution_mode: 'PAPER',
   market_data_source: '—',
+  max_risk_percent: 1,
   active_session: '—',
   broker: { connected: false, provider: 'Simulation Feed' },
   capabilities: { paper_execution: true, live_execution: false, auto_execution: false, news_guard: false },
@@ -548,10 +550,10 @@ function ExecuteCard({ signal, portfolio, runtime, sizing, riskPercent, setRiskP
       <h3 className="text-[12px] font-semibold text-white">{t.executeTrade}</h3>
       <div className="mt-3 grid grid-cols-3 overflow-hidden rounded-md border border-[#17344e] bg-[#05111c] text-[9px]"><button className="bg-[#1e5a90] py-2 text-white">{t.market}</button><button className="py-2 text-[#8296aa]">{t.pending}</button><button className="py-2 text-[#8296aa]">{t.slTp}</button></div>
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <label><span className="mb-1.5 block text-[8px] text-[#8195a8]">{t.riskPercent}</span><input className="aura-field force-ltr" type="number" min="0.1" max="2" step="0.1" value={riskPercent} onChange={e => setRiskPercent(Math.min(2, Math.max(.1, Number(e.target.value) || .1)))} /></label>
+        <label><span className="mb-1.5 block text-[8px] text-[#8195a8]">{t.riskPercent}</span><input className="aura-field force-ltr" type="number" min="0.1" max={runtime.max_risk_percent || 1} step="0.1" value={riskPercent} onChange={e => setRiskPercent(Math.min(runtime.max_risk_percent || 1, Math.max(.1, Number(e.target.value) || .1)))} /></label>
         <label><span className="mb-1.5 block text-[8px] text-[#8195a8]">{t.lotSizeAuto}</span><div className="aura-field flex items-center force-ltr">{lot ? lot.toFixed(2) : '—'}</div></label>
       </div>
-      <div className="mt-2 flex gap-1.5">{[.5,1,2].map(v => <button key={v} onClick={() => setRiskPercent(v)} className={`rounded px-2 py-1 text-[8px] ${riskPercent === v ? 'bg-[#1d5587] text-white' : 'bg-[#10243a] text-[#8599ac]'}`}>{v}%</button>)}</div>
+      <div className="mt-2 flex gap-1.5">{[.5,1,2].filter(v => v <= (runtime.max_risk_percent || 1)).map(v => <button key={v} onClick={() => setRiskPercent(v)} className={`rounded px-2 py-1 text-[8px] ${riskPercent === v ? 'bg-[#1d5587] text-white' : 'bg-[#10243a] text-[#8599ac]'}`}>{v}%</button>)}</div>
       <button onClick={onExecute} disabled={!canExecute || executing} className="aura-execute mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-md text-[11px] font-bold transition">{executing ? <Zap className="h-3.5 w-3.5 animate-pulse" /> : <Play className="h-3.5 w-3.5 fill-current" />}{executing ? t.routing : label}<ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" /></button>
       {!canExecute && <div className="mt-2 text-center text-[8px] leading-4 text-[#586f84]">{t.riskBlocked}</div>}
     </section>
@@ -727,7 +729,7 @@ export default function TradingTerminal() {
         if (!healthRes.ok || !marketRes.ok || !portfolioRes.ok) throw new Error('AURA API unavailable');
         const health = await healthRes.json(); const market = await marketRes.json(); const pf = await portfolioRes.json();
         if (!alive) return;
-        setRuntime({ execution_mode: health.execution_mode, market_data_source: market.market_data_source, market_status: market.market_status, active_session: health.active_session, broker: health.broker, capabilities: health.capabilities, news_guard: health.news_guard, risk_guard: health.risk_guard });
+        setRuntime({ execution_mode: health.execution_mode, market_data_source: market.market_data_source, market_status: market.market_status, max_risk_percent: health.max_risk_percent, active_session: health.active_session, broker: health.broker, capabilities: health.capabilities, news_guard: health.news_guard, risk_guard: health.risk_guard });
         setSignal(market.signal); setCandles(market.candles || []); setPortfolio(pf);
       } catch { if (alive) setStreamState('offline'); }
     };
@@ -740,7 +742,7 @@ export default function TradingTerminal() {
         if (!alive) return;
         try {
           const payload = JSON.parse(event.data);
-          setRuntime({ execution_mode: payload.execution_mode, market_data_source: payload.market_data_source, market_status: payload.market_status, active_session: payload.active_session, broker: payload.broker, capabilities: payload.capabilities, news_guard: payload.news_guard, risk_guard: payload.risk_guard });
+          setRuntime({ execution_mode: payload.execution_mode, market_data_source: payload.market_data_source, market_status: payload.market_status, max_risk_percent: payload.max_risk_percent, active_session: payload.active_session, broker: payload.broker, capabilities: payload.capabilities, news_guard: payload.news_guard, risk_guard: payload.risk_guard });
           setSignal(payload.signal); setCandles(payload.candles || []); if (payload.portfolio) setPortfolio(payload.portfolio);
         } catch { /* malformed frame */ }
       };
