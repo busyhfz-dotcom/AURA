@@ -48,10 +48,18 @@ class Settings:
     economic_calendar_api_key: Optional[str]
     news_embargo_before_minutes: int
     news_embargo_after_minutes: int
+    live_execution_transport: str
+    execution_worker_url: Optional[str]
+    execution_worker_secret: Optional[str]
+    execution_worker_timeout_seconds: int
 
     @property
     def live_execution_enabled(self) -> bool:
         return self.execution_mode == "live"
+
+    @property
+    def execution_worker_configured(self) -> bool:
+        return bool(self.execution_worker_url and self.execution_worker_secret)
 
 
 def load_settings() -> Settings:
@@ -86,4 +94,8 @@ def load_settings() -> Settings:
         economic_calendar_api_key=os.getenv("AURA_ECONOMIC_CALENDAR_API_KEY") or None,
         news_embargo_before_minutes=_int_env("AURA_NEWS_EMBARGO_BEFORE_MINUTES", 30, 0, 240),
         news_embargo_after_minutes=_int_env("AURA_NEWS_EMBARGO_AFTER_MINUTES", 15, 0, 240),
+        live_execution_transport=(os.getenv("AURA_LIVE_EXECUTION_TRANSPORT", "worker").strip().lower() or "worker"),
+        execution_worker_url=(os.getenv("AURA_EXECUTION_WORKER_URL") or "").strip().rstrip("/") or None,
+        execution_worker_secret=os.getenv("AURA_EXECUTION_WORKER_SECRET") or None,
+        execution_worker_timeout_seconds=_int_env("AURA_EXECUTION_WORKER_TIMEOUT_SECONDS", 10, 2, 60),
     )
