@@ -240,6 +240,73 @@ class AuraLedger:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def closed_positions(self, limit: int = 100) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, order_id, symbol, action, lots, entry_price, exit_price, sl, tp,
+                       risk_percent, status, realized_pnl, opened_at, closed_at
+                FROM positions
+                WHERE status = 'CLOSED'
+                ORDER BY closed_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def performance_summary(self) -> dict:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT realized_pnl, closed_at
+                FROM positions
+                WHERE status = 'CLOSED'
+                ORDER BY closed_at ASC
+                """
+            ).fetchall()
+
+        pnl_values = [float(row["realized_pnl"] or 0.0) for row in rows]
+        wins = [value for value in pnl_values if value > 0]
+        losses = [value for value in pnl_values if value < 0]
+        breakeven = len(pnl_values) - len(wins) - len(losses)
+        gross_profit = sum(wins)
+        gross_loss = abs(sum(losses))
+        net_realized = sum(pnl_values)
+        total = len(pnl_values)
+
+        balance = self.starting_balance
+        peak = balance
+        max_drawdown_percent = 0.0
+        equity_curve = []
+        for row, pnl in zip(rows, pnl_values):
+            balance += pnl
+            peak = max(peak, balance)
+            drawdown = ((peak - balance) / peak * 100.0) if peak > 0 else 0.0
+            max_drawdown_percent = max(max_drawdown_percent, drawdown)
+            equity_curve.append({
+                "timestamp": row["closed_at"],
+                "balance": round(balance, 2),
+            })
+
+        return {
+            "closed_trades": total,
+            "wins": len(wins),
+            "losses": len(losses),
+            "breakeven": breakeven,
+            "win_rate": round((len(wins) / total * 100.0), 2) if total else None,
+            "gross_profit": round(gross_profit, 2),
+            "gross_loss": round(gross_loss, 2),
+            "net_realized": round(net_realized, 2),
+            "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss > 0 else None,
+            "avg_win": round(gross_profit / len(wins), 2) if wins else None,
+            "avg_loss": round(sum(losses) / len(losses), 2) if losses else None,
+            "expectancy": round(net_realized / total, 2) if total else None,
+            "max_drawdown_percent": round(max_drawdown_percent, 2) if total else None,
+            "equity_curve": equity_curve,
+        }
+
     def recent_audit(self, limit: int = 30) -> list[dict]:
         limit = max(1, min(int(limit), 100))
         with self._lock:
