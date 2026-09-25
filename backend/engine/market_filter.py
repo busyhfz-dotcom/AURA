@@ -21,7 +21,12 @@ class MarketFilter:
             return "Asia Session"
         return "Off-Peak"
 
-    def news_guard_status(self, symbol: Optional[str] = None, include_events: bool = False) -> dict:
+    def news_guard_status(
+        self,
+        symbol: Optional[str] = None,
+        include_events: bool = False,
+        refresh: bool = True,
+    ) -> dict:
         if self.news_guard is None:
             return {
                 "configured": False,
@@ -35,7 +40,7 @@ class MarketFilter:
                 "active_events": [],
                 "next_event": None,
             }
-        return self.news_guard.status(symbol=symbol, include_events=include_events)
+        return self.news_guard.status(symbol=symbol, include_events=include_events, refresh=refresh)
 
     def is_news_embargo_active(self, symbol: Optional[str] = None) -> bool:
         return bool(self.news_guard_status(symbol=symbol)["active"])
