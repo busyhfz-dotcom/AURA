@@ -1,6 +1,15 @@
-# AURA Terminal v3.4
+# AURA Terminal v3.5
 
 AURA is an institutional-style market intelligence, risk and execution workspace. The default product language is English; Persian is a first-class RTL locale using the same component system and data contracts.
+
+## v3.5 — Verified historical backtesting
+
+- Replaced the Backtesting placeholder with a real walk-forward runner using the same AURA confluence engine as the terminal.
+- Backtests accept only verified user-uploaded OHLC CSV or MT5 historical candles when a compatible MT5 runtime is connected; simulation-feed candles are never used as historical performance evidence.
+- Historical Killzone evaluation uses each candle's UTC timestamp rather than current server time.
+- A setup is counted only if a future candle actually touches entry. If SL and TP are both inside the same OHLC bar, AURA uses a conservative stop-first assumption.
+- Backtest runs, trades, assumptions and equity curves are persisted in the ledger and available in the terminal history.
+- Fees and slippage are explicitly marked as not modeled rather than hidden.
 
 ## v3.4 — Data-backed product workspace
 
@@ -87,6 +96,9 @@ MT5_SERVER=
 - `GET /api/market/{symbol}` — candles + structural analysis for one symbol.
 - `GET /api/portfolio` — account metrics, paper positions and recent orders.
 - `GET /api/audit` — durable operational audit events.
+- `GET /api/backtests/capabilities` — verified historical-source availability and risk ceiling.
+- `GET /api/backtests` / `GET /api/backtests/{run_id}` — persisted backtest history and detail.
+- `POST /api/backtests/run` — walk-forward run from uploaded OHLC or MT5 history.
 - `POST /api/trade/execute` — guarded paper/live execution.
 - `POST /api/positions/{position_id}/close` — closes a paper position at current simulated/market mark.
 - `WS /ws/signals?symbol=EURUSD` — realtime market, intelligence, runtime and portfolio stream.
