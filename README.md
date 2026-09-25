@@ -1,6 +1,15 @@
-# AURA Terminal v3.5
+# AURA Terminal v3.6
 
 AURA is an institutional-style market intelligence, risk and execution workspace. The default product language is English; Persian is a first-class RTL locale using the same component system and data contracts.
+
+## v3.6 — Verified economic News Guard
+
+- Added a configurable Finnhub economic-calendar adapter with normalized event, currency, impact, actual, estimate and previous values.
+- News Guard filters high-impact events by the currencies relevant to the protected symbol and applies configurable pre/post-event embargo windows.
+- Live execution is fail-closed: an unconfigured provider, provider failure, unknown safe window, or active embargo prevents live routing.
+- Live capability state now agrees with the execution endpoint instead of advertising readiness while News Guard is unsafe.
+- Economic Calendar and News Guard surfaces render structured verified events and provider-health states; no event is fabricated when the provider is unavailable.
+- Added repository GitHub Actions CI for backend compilation/tests and frontend TypeScript/build validation.
 
 ## v3.5 — Verified historical backtesting
 
@@ -83,6 +92,12 @@ NEXT_PUBLIC_AURA_API_URL=http://localhost:8000
 # Required to unlock LIVE execution on the backend.
 AURA_EXECUTION_API_KEY=
 
+# Required before LIVE execution can verify the economic-news safety window.
+AURA_ECONOMIC_CALENDAR_PROVIDER=finnhub
+AURA_ECONOMIC_CALENDAR_API_KEY=
+AURA_NEWS_EMBARGO_BEFORE_MINUTES=30
+AURA_NEWS_EMBARGO_AFTER_MINUTES=15
+
 # Required only on a compatible Windows MT5 execution runtime.
 MT5_ACCOUNT=
 MT5_PASSWORD=
@@ -96,6 +111,7 @@ MT5_SERVER=
 - `GET /api/market/{symbol}` — candles + structural analysis for one symbol.
 - `GET /api/portfolio` — account metrics, paper positions and recent orders.
 - `GET /api/audit` — durable operational audit events.
+- `GET /api/calendar` — verified economic events, provider integrity and symbol-aware embargo state.
 - `GET /api/backtests/capabilities` — verified historical-source availability and risk ceiling.
 - `GET /api/backtests` / `GET /api/backtests/{run_id}` — persisted backtest history and detail.
 - `POST /api/backtests/run` — walk-forward run from uploaded OHLC or MT5 history.
@@ -117,4 +133,4 @@ For real live deployment, isolate the MT5 adapter on a Windows worker/VM (or use
 
 ## Next production layer
 
-The remaining platform work is identity and infrastructure rather than visual shell work: authenticated organizations/users, broker-account ownership, PostgreSQL event storage, signed server-to-server execution, an economic-calendar provider, MT5 position reconciliation, idempotent routing, historical backtesting workers and observability.
+The remaining platform work is the isolated Auto-Pilot/MT5 execution worker, idempotent broker routing and reconciliation, then authenticated organizations/users, broker-account ownership, PostgreSQL event storage, observability and production infrastructure.
