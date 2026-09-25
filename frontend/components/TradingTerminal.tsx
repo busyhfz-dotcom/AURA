@@ -89,9 +89,37 @@ type RiskStatus = {
   };
 };
 
+type MarketStatus = {
+  symbol: string;
+  source: string;
+  last_price?: number | null;
+  bid?: number | null;
+  ask?: number | null;
+  spread?: number | null;
+  spread_points?: number | null;
+  volatility_percent?: number | null;
+  volatility_state?: 'LOW' | 'NORMAL' | 'ELEVATED' | 'UNAVAILABLE' | string;
+};
+
+type PositionSizePreview = {
+  symbol: string;
+  action: 'BUY' | 'SELL';
+  risk_percent: number;
+  balance: number;
+  risk_amount: number;
+  entry: number;
+  sl: number;
+  stop_distance: number;
+  stop_pips?: number | null;
+  lots: number;
+  estimated_margin?: number | null;
+  basis: string;
+};
+
 type RuntimeState = {
   execution_mode: 'PAPER' | 'LIVE';
   market_data_source: string;
+  market_status?: MarketStatus;
   active_session: string;
   broker: { connected: boolean; provider: string; reason?: string | null };
   capabilities: {
@@ -510,14 +538,10 @@ function SignalCard({ signal, t }: { signal: Signal; t: any }) {
   );
 }
 
-function ExecuteCard({ signal, portfolio, runtime, riskPercent, setRiskPercent, executing, onExecute, t }: { signal: Signal; portfolio: Portfolio; runtime: RuntimeState; riskPercent: number; setRiskPercent: (v: number) => void; executing: boolean; onExecute: () => void; t: any }) {
+function ExecuteCard({ signal, portfolio, runtime, sizing, riskPercent, setRiskPercent, executing, onExecute, t }: { signal: Signal; portfolio: Portfolio; runtime: RuntimeState; sizing: PositionSizePreview | null; riskPercent: number; setRiskPercent: (v: number) => void; executing: boolean; onExecute: () => void; t: any }) {
   const ready = signal.status === 'A_PLUS_SETUP' && !!signal.action && !!signal.entry && !!signal.sl && !!signal.tp;
-  const canExecute = ready && (runtime.capabilities.paper_execution || runtime.capabilities.live_execution);
-  const stopDistance = signal.entry && signal.sl ? Math.abs(signal.entry - signal.sl) : 0;
-  const pipSize = signal.symbol.includes('JPY') ? .01 : .0001;
-  const pips = stopDistance ? stopDistance / pipSize : 0;
-  const riskAmount = portfolio.account.balance * riskPercent / 100;
-  const lot = pips > 0 ? Math.max(.01, Math.min(50, riskAmount / (pips * 10))) : 0;
+  const canExecute = ready && !!sizing && (runtime.capabilities.paper_execution || runtime.capabilities.live_execution);
+  const lot = sizing?.lots || 0;
   const label = signal.action === 'SELL' ? t.executeSell : signal.action === 'BUY' ? t.executeBuy : t.executeOrder;
   return (
     <section className="aura-panel rounded-lg p-3.5">
@@ -534,18 +558,16 @@ function ExecuteCard({ signal, portfolio, runtime, riskPercent, setRiskPercent, 
   );
 }
 
-function StatusColumn({ runtime, portfolio, signal, riskPercent, t }: { runtime: RuntimeState; portfolio: Portfolio; signal: Signal; riskPercent: number; t: any }) {
-  const stopDistance = signal.entry && signal.sl ? Math.abs(signal.entry - signal.sl) : 0;
-  const pipSize = signal.symbol.includes('JPY') ? .01 : .0001;
-  const pips = stopDistance ? stopDistance / pipSize : 0;
-  const riskAmount = portfolio.account.balance * riskPercent / 100;
-  const lot = pips > 0 ? Math.max(.01, Math.min(50, riskAmount / (pips * 10))) : 0;
+function StatusColumn({ runtime, portfolio, signal, sizing, riskPercent, t }: { runtime: RuntimeState; portfolio: Portfolio; signal: Signal; sizing: PositionSizePreview | null; riskPercent: number; t: any }) {
+  const market = runtime.market_status;
   const session = runtime.active_session || signal.checklist.session_name || '—';
+  const volatilityState = market?.volatility_state || 'UNAVAILABLE';
+  const volatilityClass = volatilityState === 'ELEVATED' ? 'text-[#ffb14a]' : volatilityState === 'UNAVAILABLE' ? 'text-[#71869b]' : 'text-[#2ae9bd]';
   return (
     <div className="hidden min-w-0 flex-col gap-2 2xl:flex">
       <section className="aura-panel rounded-lg p-3.5">
         <div className="flex items-center justify-between"><h3 className="text-[12px] font-semibold text-white">{t.marketStatus}</h3><span className={`flex items-center gap-1 rounded px-2 py-1 text-[8px] font-semibold ${runtime.execution_mode === 'LIVE' ? 'bg-[#0c553f]/50 text-[#2ae9bd]' : 'bg-[#173a5f] text-[#78bfff]'}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{runtime.execution_mode === 'LIVE' ? t.live : t.paper}</span></div>
-        <div className="mt-3 grid grid-cols-2 gap-y-4 text-[9px]"><div><div className="text-[#71869b]">{t.spread}</div><div className="mt-1 aura-mono text-[11px] text-white">—</div></div><div><div className="text-[#71869b]">{t.volatility}</div><div className="mt-1 text-[11px] text-[#2ae9bd]">{t.normal}</div></div><div><div className="text-[#71869b]">{t.session}</div><div className="mt-1 text-[11px] text-white">{session}</div></div><div><div className="text-[#71869b]">{t.killzoneActive}</div><div className="mt-1 text-[11px] text-white">{signal.checklist.killzone_active ? 'Active' : '—'}</div></div></div>
+        <div className="mt-3 grid grid-cols-2 gap-y-4 text-[9px]"><div><div className="text-[#71869b]">{t.spread}</div><div className="mt-1 aura-mono text-[11px] text-white">{typeof market?.spread_points === 'number' ? `${market.spread_points.toFixed(1)} pt` : '—'}</div></div><div><div className="text-[#71869b]">{t.volatility}</div><div className={`mt-1 text-[11px] ${volatilityClass}`}>{volatilityState === 'UNAVAILABLE' ? '—' : `${volatilityState} · ${(market?.volatility_percent || 0).toFixed(3)}%`}</div></div><div><div className="text-[#71869b]">{t.session}</div><div className="mt-1 text-[11px] text-white">{session}</div></div><div><div className="text-[#71869b]">{t.killzoneActive}</div><div className="mt-1 text-[11px] text-white">{signal.checklist.killzone_active ? 'Active' : '—'}</div></div></div>
       </section>
       <section className="aura-panel rounded-lg p-3.5">
         <div className="flex items-center justify-between"><h3 className="text-[12px] font-semibold text-white">{t.newsGuard}</h3><span className={`flex items-center gap-1 rounded px-2 py-1 text-[8px] font-semibold ${runtime.news_guard.configured ? 'bg-[#0c553f]/50 text-[#2ae9bd]' : 'bg-[#3c2f1b] text-[#e6b866]'}`}><ShieldCheck className="h-3 w-3" />{runtime.news_guard.configured ? t.safe : t.notConfigured}</span></div>
@@ -556,10 +578,10 @@ function StatusColumn({ runtime, portfolio, signal, riskPercent, t }: { runtime:
         <h3 className="text-[12px] font-semibold text-white">{t.positionSizing}</h3>
         <div className="mt-3 space-y-3 text-[9px]">
           <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.accountBalance}</span><span className="aura-mono text-white">{formatMoney(portfolio.account.balance)}</span></div>
-          <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.riskAmount} ({riskPercent}%)</span><span className="aura-mono text-white">{formatMoney(riskAmount)}</span></div>
-          <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.stopDistance}</span><span className="aura-mono text-white">{pips ? `${pips.toFixed(1)} pips` : '—'}</span></div>
-          <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.lotSize}</span><span className="aura-mono text-white">{lot ? lot.toFixed(2) : '—'}</span></div>
-          <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.estMargin}</span><span className="aura-mono text-white">—</span></div>
+          <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.riskAmount} ({riskPercent}%)</span><span className="aura-mono text-white">{formatMoney(sizing?.risk_amount)}</span></div>
+          <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.stopDistance}</span><span className="aura-mono text-white">{typeof sizing?.stop_pips === 'number' ? `${sizing.stop_pips.toFixed(1)} pips` : typeof sizing?.stop_distance === 'number' ? formatPrice(sizing.stop_distance, signal.symbol) : '—'}</span></div>
+          <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.lotSize}</span><span className="aura-mono text-white">{sizing?.lots ? sizing.lots.toFixed(2) : '—'}</span></div>
+          <div className="flex items-center justify-between"><span className="text-[#7890a4]">{t.estMargin}</span><span className="aura-mono text-white">{typeof sizing?.estimated_margin === 'number' ? formatMoney(sizing.estimated_margin) : '—'}</span></div>
         </div>
       </section>
     </div>
@@ -602,7 +624,7 @@ function RecentSignals({ signal, portfolio, t }: { signal: Signal; portfolio: Po
   );
 }
 
-function MobileTerminalView({ candles, signal, runtime, portfolio, riskPercent, setRiskPercent, executing, onExecute, t }: { candles: Candle[]; signal: Signal; runtime: RuntimeState; portfolio: Portfolio; riskPercent: number; setRiskPercent: (v: number) => void; executing: boolean; onExecute: () => void; t: any }) {
+function MobileTerminalView({ candles, signal, runtime, portfolio, sizing, riskPercent, setRiskPercent, executing, onExecute, t }: { candles: Candle[]; signal: Signal; runtime: RuntimeState; portfolio: Portfolio; sizing: PositionSizePreview | null; riskPercent: number; setRiskPercent: (v: number) => void; executing: boolean; onExecute: () => void; t: any }) {
   const ready = signal.status === 'A_PLUS_SETUP' && !!signal.action;
   return (
     <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] px-3 pb-24 pt-3 md:hidden">
@@ -624,7 +646,7 @@ function MobileTerminalView({ candles, signal, runtime, portfolio, riskPercent, 
         </div>
         <div className="h-[285px] border-t border-[#173047]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} /></div>
         <div className="aura-thin-scroll flex items-center gap-2 overflow-x-auto border-t border-[#173047] px-3 py-2 text-[9px] text-[#7f94a8]">{['5m','15m','1h','4h','D'].map(tf => <button key={tf} className={`rounded px-3 py-1.5 ${tf === '15m' ? 'bg-[#153958] text-white' : 'bg-[#071522]'}`}>{tf}</button>)}</div>
-        <div className="p-3"><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={onExecute} t={t} /></div>
+        <div className="p-3"><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizing} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={onExecute} t={t} /></div>
       </section>
     </main>
   );
@@ -672,6 +694,7 @@ export default function TradingTerminal() {
   const [portfolio, setPortfolio] = useState<Portfolio>(EMPTY_PORTFOLIO);
   const [markets, setMarkets] = useState<MarketItem[]>([]);
   const [riskPercent, setRiskPercent] = useState(1);
+  const [sizingPreview, setSizingPreview] = useState<PositionSizePreview | null>(null);
   const [executing, setExecuting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -704,7 +727,7 @@ export default function TradingTerminal() {
         if (!healthRes.ok || !marketRes.ok || !portfolioRes.ok) throw new Error('AURA API unavailable');
         const health = await healthRes.json(); const market = await marketRes.json(); const pf = await portfolioRes.json();
         if (!alive) return;
-        setRuntime({ execution_mode: health.execution_mode, market_data_source: market.market_data_source, active_session: health.active_session, broker: health.broker, capabilities: health.capabilities, news_guard: health.news_guard, risk_guard: health.risk_guard });
+        setRuntime({ execution_mode: health.execution_mode, market_data_source: market.market_data_source, market_status: market.market_status, active_session: health.active_session, broker: health.broker, capabilities: health.capabilities, news_guard: health.news_guard, risk_guard: health.risk_guard });
         setSignal(market.signal); setCandles(market.candles || []); setPortfolio(pf);
       } catch { if (alive) setStreamState('offline'); }
     };
@@ -717,7 +740,7 @@ export default function TradingTerminal() {
         if (!alive) return;
         try {
           const payload = JSON.parse(event.data);
-          setRuntime({ execution_mode: payload.execution_mode, market_data_source: payload.market_data_source, active_session: payload.active_session, broker: payload.broker, capabilities: payload.capabilities, news_guard: payload.news_guard, risk_guard: payload.risk_guard });
+          setRuntime({ execution_mode: payload.execution_mode, market_data_source: payload.market_data_source, market_status: payload.market_status, active_session: payload.active_session, broker: payload.broker, capabilities: payload.capabilities, news_guard: payload.news_guard, risk_guard: payload.risk_guard });
           setSignal(payload.signal); setCandles(payload.candles || []); if (payload.portfolio) setPortfolio(payload.portfolio);
         } catch { /* malformed frame */ }
       };
@@ -735,6 +758,30 @@ export default function TradingTerminal() {
     };
     load(); const id = setInterval(load, 15000); return () => { alive = false; clearInterval(id); };
   }, []);
+
+  useEffect(() => {
+    if (signal.status !== 'A_PLUS_SETUP' || !signal.action || !signal.entry || !signal.sl) {
+      setSizingPreview(null);
+      return;
+    }
+    const controller = new AbortController();
+    const preview = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/risk/preview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({ symbol: signal.symbol, action: signal.action, entry: signal.entry, sl: signal.sl, risk_percent: riskPercent }),
+        });
+        if (!res.ok) { setSizingPreview(null); return; }
+        setSizingPreview(await res.json());
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') setSizingPreview(null);
+      }
+    };
+    preview();
+    return () => controller.abort();
+  }, [signal.symbol, signal.status, signal.action, signal.entry, signal.sl, riskPercent, portfolio.account.balance]);
 
   const refreshPortfolio = async () => {
     try { const res = await fetch(`${apiBase}/api/portfolio`); if (res.ok) setPortfolio(await res.json()); } catch { /* no-op */ }
@@ -772,7 +819,7 @@ export default function TradingTerminal() {
         <WatchlistStrip items={markets} selectedSymbol={selectedSymbol} setSelectedSymbol={(s) => { setSelectedSymbol(s); setView('terminal'); }} />
 
         {view === 'markets' ? <MarketsView items={markets} selectedSymbol={selectedSymbol} setSelectedSymbol={(s) => { setSelectedSymbol(s); setView('terminal'); }} t={t} /> : view === 'backtesting' ? <BacktestingView selectedMarket={selectedMarket} t={t} /> : isMobile ? (
-          <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} />
+          <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} />
         ) : (
           <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] p-2 pb-20 md:p-2.5 xl:pb-2.5">
             <div className="grid min-h-[510px] gap-2 2xl:grid-cols-[minmax(0,1fr)_300px_210px]">
@@ -781,8 +828,8 @@ export default function TradingTerminal() {
                 <div className="h-[395px] min-h-[330px] 2xl:h-[425px]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} /></div>
                 <div className="flex h-8 items-center justify-between border-t border-[#173047]/70 bg-[#04111c] px-3 text-[8px] text-[#71869b]"><div className="flex gap-4"><span>1D</span><span>5D</span><span>1M</span><span>3M</span><span>6M</span><span>YTD</span><span>1Y</span><span>All</span></div><div className="flex items-center gap-3"><span className="hidden sm:inline">{new Date().toLocaleTimeString([], { hour12: false })} (UTC)</span><span>%</span><span className="text-[#54a9ed]">log</span><span className="text-[#54a9ed]">auto</span></div></div>
               </section>
-              <div className="grid min-w-0 gap-2 md:grid-cols-2 2xl:flex 2xl:flex-col"><SignalCard signal={signal} t={t} /><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} /></div>
-              <StatusColumn runtime={runtime} portfolio={portfolio} signal={signal} riskPercent={riskPercent} t={t} />
+              <div className="grid min-w-0 gap-2 md:grid-cols-2 2xl:flex 2xl:flex-col"><SignalCard signal={signal} t={t} /><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} /></div>
+              <StatusColumn runtime={runtime} portfolio={portfolio} signal={signal} sizing={sizingPreview} riskPercent={riskPercent} t={t} />
             </div>
 
             <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_270px]"><PositionsPanel portfolio={portfolio} onClose={closePosition} t={t} /><RecentSignals signal={signal} portfolio={portfolio} t={t} /></div>
