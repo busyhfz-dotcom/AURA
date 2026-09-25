@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  backend-engine:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      AURA_EXECUTION_MODE: ${AURA_EXECUTION_MODE:-paper}
+      AURA_CORS_ORIGINS: ${AURA_CORS_ORIGINS:-http://localhost:3000}
+      AURA_DEFAULT_SYMBOL: ${AURA_DEFAULT_SYMBOL:-EURUSD}
+      AURA_MAX_RISK_PERCENT: ${AURA_MAX_RISK_PERCENT:-1.0}
+      AURA_MT5_DEVIATION: ${AURA_MT5_DEVIATION:-20}
+      AURA_DATABASE_PATH: ${AURA_DATABASE_PATH:-/data/aura.db}
+      AURA_PAPER_STARTING_BALANCE: ${AURA_PAPER_STARTING_BALANCE:-10000}
+      AURA_MAX_OPEN_POSITIONS: ${AURA_MAX_OPEN_POSITIONS:-3}
+      AURA_MAX_TRADES_PER_DAY: ${AURA_MAX_TRADES_PER_DAY:-8}
+      AURA_MAX_DAILY_LOSS_PERCENT: ${AURA_MAX_DAILY_LOSS_PERCENT:-2.0}
+      AURA_EXECUTION_API_KEY: ${AURA_EXECUTION_API_KEY:-}
+      MT5_ACCOUNT: ${MT5_ACCOUNT:-}
+      MT5_PASSWORD: ${MT5_PASSWORD:-}
+      MT5_SERVER: ${MT5_SERVER:-}
+    volumes:
+      - aura-data:/data
+    restart: unless-stopped
+
+  frontend-terminal:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_AURA_API_URL: ${NEXT_PUBLIC_AURA_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend-engine
+    restart: unless-stopped
+
+volumes:
+  aura-data:

@@ -1,0 +1,285 @@
+import json
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable, Optional
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class AuraLedger:
+    """Small durable ledger used for paper trading and execution audit.
+
+    SQLite is intentionally used here so the terminal has persistence out of the box.
+    Production deployments can migrate this interface to PostgreSQL without changing
+    the API contract consumed by the frontend.
+    """
+
+    def __init__(self, path: str, starting_balance: float = 10_000.0):
+        self.path = path
+        self.starting_balance = float(starting_balance)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._initialize()
+
+    def _initialize(self) -> None:
+        with self._lock, self._conn:
+            self._conn.executescript(
+                """
+                PRAGMA journal_mode=WAL;
+                PRAGMA foreign_keys=ON;
+
+                CREATE TABLE IF NOT EXISTS account_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    starting_balance REAL NOT NULL,
+                    balance REAL NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS orders (
+                    id TEXT PRIMARY KEY,
+                    broker_order_id TEXT,
+                    mode TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    lots REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    sl REAL NOT NULL,
+                    tp REAL NOT NULL,
+                    risk_percent REAL NOT NULL,
+                    message TEXT,
+                    raw_payload TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS positions (
+                    id TEXT PRIMARY KEY,
+                    order_id TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    lots REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    exit_price REAL,
+                    sl REAL NOT NULL,
+                    tp REAL NOT NULL,
+                    risk_percent REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    realized_pnl REAL NOT NULL DEFAULT 0,
+                    opened_at TEXT NOT NULL,
+                    closed_at TEXT,
+                    FOREIGN KEY(order_id) REFERENCES orders(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id TEXT PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
+                CREATE INDEX IF NOT EXISTS idx_positions_opened_at ON positions(opened_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_events(created_at DESC);
+                """
+            )
+            row = self._conn.execute("SELECT id FROM account_state WHERE id = 1").fetchone()
+            if row is None:
+                now = utc_now_iso()
+                self._conn.execute(
+                    "INSERT INTO account_state (id, starting_balance, balance, updated_at) VALUES (1, ?, ?, ?)",
+                    (self.starting_balance, self.starting_balance, now),
+                )
+
+    def add_audit(self, event_type: str, message: str, severity: str = "info", metadata: Optional[dict] = None) -> str:
+        event_id = f"EVT-{uuid.uuid4().hex[:12].upper()}"
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO audit_events (id, event_type, severity, message, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (event_id, event_type, severity, message, json.dumps(metadata or {}), utc_now_iso()),
+            )
+        return event_id
+
+    def record_execution(self, result: dict) -> dict:
+        order_id = f"ORD-{uuid.uuid4().hex[:12].upper()}"
+        created_at = utc_now_iso()
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO orders (
+                    id, broker_order_id, mode, status, symbol, action, lots,
+                    entry_price, sl, tp, risk_percent, message, raw_payload, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    order_id,
+                    str(result.get("order_id", "")),
+                    result["mode"],
+                    result["status"],
+                    result["symbol"],
+                    result["action"],
+                    float(result["lots"]),
+                    float(result["entry_price"]),
+                    float(result["sl"]),
+                    float(result["tp"]),
+                    float(result["risk_percent"]),
+                    result.get("message"),
+                    json.dumps(result),
+                    created_at,
+                ),
+            )
+
+            position_id = None
+            # Paper positions are owned by the local simulation ledger. Live positions
+            # remain owned by MT5 and must be synchronized from the broker, never invented locally.
+            if result["status"] == "PAPER_FILLED" and result.get("mode") == "paper":
+                position_id = f"POS-{uuid.uuid4().hex[:12].upper()}"
+                self._conn.execute(
+                    """
+                    INSERT INTO positions (
+                        id, order_id, symbol, action, lots, entry_price, sl, tp,
+                        risk_percent, status, opened_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?)
+                    """,
+                    (
+                        position_id,
+                        order_id,
+                        result["symbol"],
+                        result["action"],
+                        float(result["lots"]),
+                        float(result["entry_price"]),
+                        float(result["sl"]),
+                        float(result["tp"]),
+                        float(result["risk_percent"]),
+                        created_at,
+                    ),
+                )
+
+        self.add_audit(
+            "execution.accepted",
+            f"{result['mode'].upper()} {result['action']} {result['symbol']} accepted.",
+            metadata={"order_id": order_id, "position_id": position_id, "status": result["status"]},
+        )
+        return {"ledger_order_id": order_id, "position_id": position_id}
+
+    def _paper_pnl(self, symbol: str, action: str, lots: float, entry: float, exit_price: float) -> float:
+        direction = 1.0 if action == "BUY" else -1.0
+        delta = (exit_price - entry) * direction
+        symbol = symbol.upper()
+        if symbol == "XAUUSD":
+            return delta * 100.0 * lots
+        if symbol == "USOIL":
+            return delta * 1000.0 * lots
+        if symbol in {"BTCUSD", "ETHUSD", "NAS100", "SP500"}:
+            return delta * lots
+        pnl_quote = delta * 100_000.0 * lots
+        if symbol.endswith("JPY") and exit_price > 0:
+            return pnl_quote / exit_price
+        return pnl_quote
+
+    def estimate_pnl(self, position: dict, mark_price: float) -> float:
+        return round(self._paper_pnl(
+            position["symbol"], position["action"], float(position["lots"]),
+            float(position["entry_price"]), float(mark_price)
+        ), 2)
+
+    def close_position(self, position_id: str, exit_price: float, paper_only: bool = True) -> dict:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM positions WHERE id = ?", (position_id,)).fetchone()
+            if row is None:
+                raise ValueError("Position not found.")
+            if row["status"] != "OPEN":
+                raise ValueError("Position is already closed.")
+            order = self._conn.execute("SELECT mode FROM orders WHERE id = ?", (row["order_id"],)).fetchone()
+            if paper_only and order and order["mode"] != "paper":
+                raise ValueError("Live positions cannot be closed through the paper ledger endpoint.")
+
+            pnl = self._paper_pnl(
+                row["symbol"], row["action"], float(row["lots"]), float(row["entry_price"]), float(exit_price)
+            )
+            closed_at = utc_now_iso()
+            with self._conn:
+                self._conn.execute(
+                    "UPDATE positions SET exit_price = ?, realized_pnl = ?, status = 'CLOSED', closed_at = ? WHERE id = ?",
+                    (float(exit_price), round(pnl, 2), closed_at, position_id),
+                )
+                self._conn.execute(
+                    "UPDATE account_state SET balance = balance + ?, updated_at = ? WHERE id = 1",
+                    (round(pnl, 2), closed_at),
+                )
+
+        self.add_audit(
+            "position.closed",
+            f"Paper position {position_id} closed at market.",
+            metadata={"position_id": position_id, "exit_price": exit_price, "realized_pnl": round(pnl, 2)},
+        )
+        return {"position_id": position_id, "status": "CLOSED", "exit_price": exit_price, "realized_pnl": round(pnl, 2)}
+
+    def open_positions(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM positions WHERE status = 'OPEN' ORDER BY opened_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def recent_orders(self, limit: int = 12) -> list[dict]:
+        limit = max(1, min(int(limit), 100))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, broker_order_id, mode, status, symbol, action, lots, entry_price, sl, tp, risk_percent, message, created_at FROM orders ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def recent_audit(self, limit: int = 30) -> list[dict]:
+        limit = max(1, min(int(limit), 100))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, event_type, severity, message, metadata, created_at FROM audit_events ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["metadata"] = json.loads(item.get("metadata") or "{}")
+            except json.JSONDecodeError:
+                item["metadata"] = {}
+            result.append(item)
+        return result
+
+    def metrics(self) -> dict:
+        today = datetime.now(timezone.utc).date().isoformat()
+        with self._lock:
+            account = self._conn.execute("SELECT * FROM account_state WHERE id = 1").fetchone()
+            open_count = self._conn.execute("SELECT COUNT(*) AS c FROM positions WHERE status = 'OPEN'").fetchone()["c"]
+            trades_today = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM orders WHERE substr(created_at, 1, 10) = ?", (today,)
+            ).fetchone()["c"]
+            realized_today = self._conn.execute(
+                "SELECT COALESCE(SUM(realized_pnl), 0) AS pnl FROM positions WHERE status = 'CLOSED' AND substr(closed_at, 1, 10) = ?",
+                (today,),
+            ).fetchone()["pnl"]
+        return {
+            "starting_balance": round(float(account["starting_balance"]), 2),
+            "balance": round(float(account["balance"]), 2),
+            "open_positions": int(open_count),
+            "trades_today": int(trades_today),
+            "realized_today": round(float(realized_today or 0), 2),
+        }
+
+    def symbol_has_open_position(self, symbol: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM positions WHERE status = 'OPEN' AND symbol = ? LIMIT 1", (symbol.upper(),)
+            ).fetchone()
+        return row is not None

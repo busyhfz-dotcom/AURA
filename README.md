@@ -1,40 +1,94 @@
-# Market Sentinel
+# AURA Terminal v3.2
 
-پنل فارسی برای پایش قیمت رمزارز و فارکس و نمایش سناریوی معاملاتی مشروط. [نسخهٔ خصوصی سایت](https://market-sentinel.somayehfarhzad.chatgpt.site)
+AURA is an institutional-style market intelligence, risk and execution workspace. The default product language is English; Persian is a first-class RTL locale using the same component system and data contracts.
 
-## وضعیت فعلی
+## v3.2 — Reference UI implementation
 
-- دادهٔ عمومی چهار رمزارز از Coinbase Exchange؛ دادهٔ فارکس پس از تنظیم امن `OANDA_API_TOKEN` و `OANDA_ACCOUNT_ID` روی سرور
-- بررسی مجدد هر ۶۰ ثانیه، فقط تا وقتی صفحه باز است
-- EMA ۲۰/۵۰، RSI ۱۴، ATR ۱۴، شکست محدودهٔ ۲۰ کندل و سنجش تازگی قیمت و کندل
-- شناسایی دو نوع شکاف: فاصلهٔ واقعی دو کندل مجاور و عدم تعادل سه‌کندلی (FVG)
-- حذف شکاف پرشده، نمایش میزان پرشدن، همپوشانی شکاف‌های مستقل و فاصله تا قیمت
-- Swing High و Swing Low تأییدشده با سه کندل در هر طرف؛ بررسی نزدیکی سوینگ به شکاف همپوشان
-- سناریوی بازآزمایی تنها پس از کندل برگشتی بسته‌شده، هم‌جهتی روند و مومنتوم، دادهٔ تازه و حد ضرر محدود؛ سناریوی شکست در حضور شکاف مخالف نزدیک رد می‌شود
-- محاسبهٔ حجم نظری بر اساس درصد ریسک، بدون اجرای سفارش
+### Exact terminal shell
+- Rebuilt the terminal around the approved AURA reference: full labeled sidebar, search/account header, horizontal multi-asset watchlist, professional chart workspace, AURA Signal card, execution card, market status, News Guard, position sizing, open-position table and recent-signal rail.
+- Added a dedicated mobile terminal composition instead of shrinking the desktop grid: signal summary → Entry/SL/TP → chart → timeframes → guarded execution → bottom navigation.
+- English is the default language. Persian can be switched in-product and flips the full interface to RTL while price/symbol data remains LTR-safe.
+- Added working Markets and Backtesting shell views using the same design language. Backtesting metrics intentionally stay empty until a historical runner is connected rather than presenting invented performance.
 
-## تعریف‌های تحلیلی
+### Multi-asset market board
+- Added `GET /api/markets` for one-call watchlist hydration.
+- Expanded deterministic simulation profiles for EURUSD, GBPUSD, USDJPY, XAUUSD, BTCUSD, ETHUSD, NAS100, USOIL and SP500.
+- WebSocket symbol switching remains dynamic through `WS /ws/signals?symbol=...`.
 
-FVG صعودی فاصلهٔ بین سقف کندل اول و کف کندل سوم در سه کندل **پیوسته و کامل** است. FVG نزولی برعکس آن است. شکاف واقعی فاصلهٔ بین محدودهٔ دو کندل مجاور است؛ برای فارکس فاصلهٔ تعطیلی آخر هفته نیز فقط در صورت وجود دادهٔ معتبر بررسی می‌شود. شکاف باید حداقل ۰٫۱۵ ATR پهنا داشته باشد. رسیدن قیمت به مرز دور شکاف آن را پرشده و از تحلیل فعال خارج می‌کند.
+### Portfolio and execution integrity
+- Retains the SQLite/WAL execution ledger, persistent paper positions, account balance, audit trail and close-at-market lifecycle introduced in v3.1.
+- Paper sizing now uses the current ledger balance rather than the original starting balance.
+- Paper risk/P&L assumptions are asset-aware for FX, JPY pairs, gold, oil, crypto and index simulations.
+- Live mode still uses broker-native MT5 `order_calc_profit`, `order_check` and `order_send`; simulation math is never reused as live sizing.
 
-سوینگ تنها وقتی ثبت می‌شود که سقف یا کف از سه کندل قبل و سه کندل بعد آن بالاتر یا پایین‌تر باشد؛ بنابراین سه کندل آخر هیچ‌وقت به‌عنوان سوینگ قطعی نمایش داده نمی‌شوند. FVGهای پیاپی ناشی از یک حرکت، یک رویداد به حساب می‌آیند و همپوشانی ساختگی تولید نمی‌کنند. همپوشانی با سوینگ، **احتمال موفقیت عددی یا تضمین واکنش نیست**.
+### Risk controls
+- Concurrent position limit.
+- Daily AURA execution limit.
+- Daily realized-loss guard.
+- Duplicate-symbol protection.
+- Broker-position checks before live routing.
+- No fake live connectivity, fills, performance metrics or economic-news protection.
 
-## راه‌اندازی
-
-Node.js 22.13 یا جدیدتر:
+## Local run
 
 ```bash
-npm ci
-npm run dev
+docker compose up --build
 ```
 
-کلیدهای کارگزار را در مخزن قرار ندهید. محیط پیش‌فرض OANDA آزمایشی است؛ `OANDA_ENVIRONMENT=live` فقط برای حساب واقعی استفاده می‌شود.
+Frontend: `http://localhost:3000`  
+Backend: `http://localhost:8000`
+
+AURA starts in **paper mode** and persists the ledger to the `aura-data` Docker volume.
+
+## Environment
 
 ```bash
-node --experimental-strip-types --test tests/market-structure.test.mjs
-npm run build
+AURA_EXECUTION_MODE=paper
+AURA_CORS_ORIGINS=http://localhost:3000
+AURA_DEFAULT_SYMBOL=EURUSD
+AURA_MAX_RISK_PERCENT=1.0
+AURA_MT5_DEVIATION=20
+AURA_DATABASE_PATH=/data/aura.db
+AURA_PAPER_STARTING_BALANCE=10000
+AURA_MAX_OPEN_POSITIONS=3
+AURA_MAX_TRADES_PER_DAY=8
+AURA_MAX_DAILY_LOSS_PERCENT=2.0
+NEXT_PUBLIC_AURA_API_URL=http://localhost:8000
+
+# Required to unlock LIVE execution on the backend.
+AURA_EXECUTION_API_KEY=
+
+# Required only on a compatible Windows MT5 execution runtime.
+MT5_ACCOUNT=
+MT5_PASSWORD=
+MT5_SERVER=
 ```
 
-## محدودیت‌ها
+## Core APIs
 
-ورود مستقل کاربران، اتصال حساب معاملاتی، پایش پس‌زمینه هنگام بسته بودن صفحه، اعلان، فیلتر خبر، کارمزد و اسپرد اجرای واقعی، آزمون تاریخی و نرخ موفقیت تجربی هنوز پیاده‌سازی نشده‌اند. دادهٔ تاریخی Coinbase ممکن است ناقص باشد؛ بین بازه‌های ناقص FVG ساخته نمی‌شود. هیچ نسبت سود به زیان یا شکاف قیمتی سود آینده را تضمین نمی‌کند.
+- `GET /api/health` — runtime, broker, capabilities and risk state.
+- `GET /api/markets` — aggregated multi-asset watchlist board.
+- `GET /api/market/{symbol}` — candles + structural analysis for one symbol.
+- `GET /api/portfolio` — account metrics, paper positions and recent orders.
+- `GET /api/audit` — durable operational audit events.
+- `POST /api/trade/execute` — guarded paper/live execution.
+- `POST /api/positions/{position_id}/close` — closes a paper position at current simulated/market mark.
+- `WS /ws/signals?symbol=EURUSD` — realtime market, intelligence, runtime and portfolio stream.
+
+## MT5 deployment note
+
+The official `MetaTrader5` Python package needs a compatible Windows environment with MetaTrader 5 available. The included Linux backend container supports analytics, simulation and paper execution but **does not provide direct MT5 live execution**.
+
+For real live deployment, isolate the MT5 adapter on a Windows worker/VM (or use a broker-native API) and put it behind an authenticated internal execution service. Broker credentials and execution privileges must never be shipped to the public browser bundle.
+
+## Validation status
+
+- Backend Python compilation: passing.
+- Backend foundation suite: 6/6 passing.
+- API smoke test: health, 9-symbol market board, symbol snapshot and portfolio all responding correctly in paper/simulation mode.
+- TS/TSX compiler parse: passing for the rebuilt terminal, locale dictionary and page entry.
+- Full `next build` could not be executed in this environment because dependency installation from npm timed out; this is an environment/network limitation, not a claimed successful build.
+
+## Next production layer
+
+The remaining platform work is identity and infrastructure rather than visual shell work: authenticated organizations/users, broker-account ownership, PostgreSQL event storage, signed server-to-server execution, an economic-calendar provider, MT5 position reconciliation, idempotent routing, historical backtesting workers and observability.
