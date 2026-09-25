@@ -488,7 +488,7 @@ async def websocket_signals(websocket: WebSocket):
             analysis = engine.find_high_probability_setup(df, symbol)
             payload = {
                 "timestamp": int(time.time()),
-                "engine_version": "3.4.0",
+                "engine_version": "3.5.0",
                 "market_data_source": source,
                 "market_status": broker.market_status(symbol, df=df, source=source),
                 "execution_mode": settings.execution_mode.upper(),
