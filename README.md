@@ -1,6 +1,17 @@
-# AURA Terminal v3.4
+# AURA Terminal v3.5
 
 AURA is an institutional-style market intelligence, risk and execution workspace. The default product language is English; Persian is a first-class RTL locale using the same component system and data contracts.
+
+## v3.5 — Historical Backtesting + verified News Guard
+
+- Backtesting is now an executable backend workflow instead of a disabled UI shell. It evaluates the AURA confluence engine against historical candles without lookahead and reports computed trades, equity, drawdown, win rate, profit factor, expectancy and R-multiple metrics.
+- Historical candles support M5, M15, M30, H1 and H4. Connected MT5 environments use broker data; disconnected environments are explicitly labeled `SIMULATION_ONLY`.
+- Backtests use a conservative same-candle policy: when OHLC data shows SL and TP both touched, SL wins because intrabar order cannot be proven.
+- Commission and slippage remain explicitly unmodeled until broker-specific assumptions are configured; the API does not silently invent them.
+- News Guard can use Finnhub's economic calendar when `AURA_ECONOMIC_CALENDAR_PROVIDER=finnhub` and `AURA_ECONOMIC_CALENDAR_API_KEY` are configured.
+- Live execution is fail-closed when the News Guard provider is missing or unable to verify a safe window.
+- Economic Calendar and News Guard surfaces now render normalized event fields, impact, forecast/actual/previous values and embargo state.
+- Added real GitHub Actions CI for backend compilation/tests and frontend TypeScript/build validation.
 
 ## v3.4 — Data-backed product workspace
 
@@ -74,6 +85,12 @@ NEXT_PUBLIC_AURA_API_URL=http://localhost:8000
 # Required to unlock LIVE execution on the backend.
 AURA_EXECUTION_API_KEY=
 
+# Optional economic calendar integration; required before guarded live execution.
+AURA_ECONOMIC_CALENDAR_PROVIDER=finnhub
+AURA_ECONOMIC_CALENDAR_API_KEY=
+AURA_NEWS_EMBARGO_BEFORE_MINUTES=30
+AURA_NEWS_EMBARGO_AFTER_MINUTES=15
+
 # Required only on a compatible Windows MT5 execution runtime.
 MT5_ACCOUNT=
 MT5_PASSWORD=
@@ -87,6 +104,8 @@ MT5_SERVER=
 - `GET /api/market/{symbol}` — candles + structural analysis for one symbol.
 - `GET /api/portfolio` — account metrics, paper positions and recent orders.
 - `GET /api/audit` — durable operational audit events.
+- `GET /api/calendar` — verified economic events and News Guard state when a provider is configured.
+- `POST /api/backtest` — historical AURA strategy evaluation with explicit data-source/assumption metadata.
 - `POST /api/trade/execute` — guarded paper/live execution.
 - `POST /api/positions/{position_id}/close` — closes a paper position at current simulated/market mark.
 - `WS /ws/signals?symbol=EURUSD` — realtime market, intelligence, runtime and portfolio stream.
