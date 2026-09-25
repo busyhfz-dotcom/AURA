@@ -2,12 +2,16 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import pandas as pd
+
+from backtesting import BacktestConfig, HistoricalBacktestEngine
 from config import load_settings
 from engine.broker_engine import MT5ExecutionEngine
 from engine.institutional_confluence import InstitutionalConfluenceEngine
@@ -20,6 +24,7 @@ logger = logging.getLogger("AuraTerminalAPI")
 
 settings = load_settings()
 engine = InstitutionalConfluenceEngine()
+backtester = HistoricalBacktestEngine(engine)
 broker = MT5ExecutionEngine(settings)
 ledger = AuraLedger(settings.database_path, settings.paper_starting_balance)
 risk_guard = RiskGuard(
@@ -59,6 +64,26 @@ class SizingRequest(BaseModel):
     entry: float = Field(gt=0)
     sl: float = Field(gt=0)
     risk_percent: float = Field(default=0.5, ge=0.1, le=2.0)
+
+
+class HistoricalBar(BaseModel):
+    time: datetime
+    open: float = Field(gt=0)
+    high: float = Field(gt=0)
+    low: float = Field(gt=0)
+    close: float = Field(gt=0)
+
+
+class BacktestRequest(BaseModel):
+    symbol: str = Field(min_length=3, max_length=16)
+    timeframe: Literal["M1", "M5", "M15", "M30", "H1", "H4", "D1"] = "M15"
+    source: Literal["UPLOAD", "MT5"] = "UPLOAD"
+    bars: list[HistoricalBar] = Field(default_factory=list, max_length=50_000)
+    start: datetime | None = None
+    end: datetime | None = None
+    initial_balance: float = Field(default=10_000.0, gt=0, le=100_000_000)
+    risk_percent: float = Field(default=0.5, ge=0.1, le=2.0)
+    max_hold_bars: int = Field(default=96, ge=1, le=500)
 
 
 def capabilities() -> dict:
@@ -283,6 +308,70 @@ async def auto_trade_status():
         "news_guard": news_guard,
         "risk_guard": risk_guard.status(),
     }
+
+
+@app.get("/api/backtests/capabilities")
+async def backtest_capabilities():
+    return {
+        "upload_ohlc": True,
+        "mt5_history": bool(broker.connected),
+        "simulation_history": False,
+        "supported_timeframes": ["M1", "M5", "M15", "M30", "H1", "H4", "D1"],
+        "message": (
+            "Use verified MT5 history or uploaded OHLC data. AURA simulation data is never used for performance backtests."
+        ),
+    }
+
+
+@app.get("/api/backtests")
+async def backtests(limit: int = 20):
+    return {"runs": ledger.recent_backtests(limit)}
+
+
+@app.get("/api/backtests/{run_id}")
+async def backtest_detail(run_id: str):
+    result = ledger.backtest_run(run_id)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backtest run not found.")
+    return result
+
+
+@app.post("/api/backtests/run")
+async def run_backtest(request: BacktestRequest):
+    symbol = request.symbol.upper().strip()
+    try:
+        if request.source == "MT5":
+            if request.start is None or request.end is None:
+                raise ValueError("MT5 backtests require start and end timestamps.")
+            history, source = broker.get_historical_candles(
+                symbol=symbol,
+                timeframe=request.timeframe,
+                start=request.start,
+                end=request.end,
+            )
+        else:
+            if len(request.bars) < 80:
+                raise ValueError("Upload at least 80 valid OHLC candles.")
+            history = pd.DataFrame([bar.model_dump() for bar in request.bars])
+            source = "USER_OHLC"
+
+        result = backtester.run(
+            history,
+            BacktestConfig(
+                symbol=symbol,
+                timeframe=request.timeframe,
+                initial_balance=request.initial_balance,
+                risk_percent=min(request.risk_percent, settings.max_risk_percent),
+                max_hold_bars=request.max_hold_bars,
+            ),
+            source=source,
+        )
+        run_id = ledger.record_backtest(result)
+        return {**result, "id": run_id}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @app.get("/api/portfolio")
