@@ -31,7 +31,7 @@ risk_guard = RiskGuard(
 
 app = FastAPI(
     title="AURA Market Intelligence API",
-    version="3.3.0",
+    version="3.4.0",
     description="Market structure analytics, durable execution audit and guarded trading infrastructure for AURA Terminal.",
 )
 
@@ -127,7 +127,7 @@ async def startup_event():
     ledger.add_audit(
         "system.start",
         "AURA API started.",
-        metadata={"version": "3.3.0", "execution_mode": settings.execution_mode},
+        metadata={"version": "3.4.0", "execution_mode": settings.execution_mode},
     )
 
 
@@ -136,7 +136,7 @@ async def health_check():
     news_guard = MarketFilter.news_guard_status()
     return {
         "status": "ONLINE",
-        "engine_version": "3.3.0",
+        "engine_version": "3.4.0",
         "execution_mode": settings.execution_mode.upper(),
         "max_risk_percent": settings.max_risk_percent,
         "broker": broker_payload(),
@@ -428,7 +428,7 @@ async def websocket_signals(websocket: WebSocket):
             analysis = engine.find_high_probability_setup(df, symbol)
             payload = {
                 "timestamp": int(time.time()),
-                "engine_version": "3.3.0",
+                "engine_version": "3.4.0",
                 "market_data_source": source,
                 "market_status": broker.market_status(symbol, df=df, source=source),
                 "execution_mode": settings.execution_mode.upper(),
