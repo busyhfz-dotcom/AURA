@@ -531,7 +531,7 @@ function SignalCard({ signal, t }: { signal: Signal; t: any }) {
         <div className="pl-3 rtl:pl-0 rtl:pr-3"><div className="text-[8px] text-[#73879b]">{t.takeProfit}</div><div className="mt-1 aura-mono text-[12px] text-[#2ae9bd]">{formatPrice(signal.tp, signal.symbol)}</div></div>
       </div>
       <div className="mt-2 flex items-center gap-2 text-[9px]"><span className="text-[#70869b]">{t.riskReward}</span><span className="aura-mono text-[#b8cadb]">{signal.rr || '—'}</span></div>
-      <div className="mt-3 grid grid-cols-2 gap-1.5 2xl:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-1.5 xl:grid-cols-4">
         {[[t.liquiditySweep, signal.checklist.sweep],[t.fvg, signal.checklist.fvg_midpoint],[t.displacement, signal.checklist.displacement],[t.londonKillzone, signal.checklist.killzone_active]].map(([label, active]) => <span key={String(label)} className={`aura-chip !px-2 !text-[8px] ${active ? '!border-[#226a5a] !bg-[#0b4338] !text-[#76ead0]' : 'opacity-55'}`}>{String(label)}</span>)}
       </div>
     </section>
@@ -564,7 +564,7 @@ function StatusColumn({ runtime, portfolio, signal, sizing, riskPercent, t }: { 
   const volatilityState = market?.volatility_state || 'UNAVAILABLE';
   const volatilityClass = volatilityState === 'ELEVATED' ? 'text-[#ffb14a]' : volatilityState === 'UNAVAILABLE' ? 'text-[#71869b]' : 'text-[#2ae9bd]';
   return (
-    <div className="hidden min-w-0 flex-col gap-2 2xl:flex">
+    <div className="hidden min-w-0 flex-col gap-2 xl:flex">
       <section className="aura-panel rounded-lg p-3.5">
         <div className="flex items-center justify-between"><h3 className="text-[12px] font-semibold text-white">{t.marketStatus}</h3><span className={`flex items-center gap-1 rounded px-2 py-1 text-[8px] font-semibold ${runtime.execution_mode === 'LIVE' ? 'bg-[#0c553f]/50 text-[#2ae9bd]' : 'bg-[#173a5f] text-[#78bfff]'}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{runtime.execution_mode === 'LIVE' ? t.live : t.paper}</span></div>
         <div className="mt-3 grid grid-cols-2 gap-y-4 text-[9px]"><div><div className="text-[#71869b]">{t.spread}</div><div className="mt-1 aura-mono text-[11px] text-white">{typeof market?.spread_points === 'number' ? `${market.spread_points.toFixed(1)} pt` : '—'}</div></div><div><div className="text-[#71869b]">{t.volatility}</div><div className={`mt-1 text-[11px] ${volatilityClass}`}>{volatilityState === 'UNAVAILABLE' ? '—' : `${volatilityState} · ${(market?.volatility_percent || 0).toFixed(3)}%`}</div></div><div><div className="text-[#71869b]">{t.session}</div><div className="mt-1 text-[11px] text-white">{session}</div></div><div><div className="text-[#71869b]">{t.killzoneActive}</div><div className="mt-1 text-[11px] text-white">{signal.checklist.killzone_active ? 'Active' : '—'}</div></div></div>
@@ -822,13 +822,13 @@ export default function TradingTerminal() {
           <MobileTerminalView candles={candles} signal={signal} runtime={runtime} portfolio={portfolio} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} />
         ) : (
           <main className="aura-thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#020b14] p-2 pb-20 md:p-2.5 xl:pb-2.5">
-            <div className="grid min-h-[510px] gap-2 2xl:grid-cols-[minmax(0,1fr)_300px_210px]">
+            <div className="aura-command-grid grid min-h-[510px] gap-2 lg:grid-cols-[minmax(0,1fr)_292px] xl:grid-cols-[minmax(0,1fr)_300px_210px]">
               <section className="aura-panel min-w-0 overflow-hidden rounded-lg">
                 <ChartHeader symbol={selectedSymbol} />
-                <div className="h-[395px] min-h-[330px] 2xl:h-[425px]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} /></div>
+                <div className="h-[395px] min-h-[330px] xl:h-[425px]"><TerminalChart candles={candles} signal={signal} source={runtime.market_data_source} /></div>
                 <div className="flex h-8 items-center justify-between border-t border-[#173047]/70 bg-[#04111c] px-3 text-[8px] text-[#71869b]"><div className="flex gap-4"><span>1D</span><span>5D</span><span>1M</span><span>3M</span><span>6M</span><span>YTD</span><span>1Y</span><span>All</span></div><div className="flex items-center gap-3"><span className="hidden sm:inline">{new Date().toLocaleTimeString([], { hour12: false })} (UTC)</span><span>%</span><span className="text-[#54a9ed]">log</span><span className="text-[#54a9ed]">auto</span></div></div>
               </section>
-              <div className="grid min-w-0 gap-2 md:grid-cols-2 2xl:flex 2xl:flex-col"><SignalCard signal={signal} t={t} /><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} /></div>
+              <div className="grid min-w-0 gap-2 md:grid-cols-2 lg:grid-cols-1 xl:flex xl:flex-col"><SignalCard signal={signal} t={t} /><ExecuteCard signal={signal} portfolio={portfolio} runtime={runtime} sizing={sizingPreview} riskPercent={riskPercent} setRiskPercent={setRiskPercent} executing={executing} onExecute={execute} t={t} /></div>
               <StatusColumn runtime={runtime} portfolio={portfolio} signal={signal} sizing={sizingPreview} riskPercent={riskPercent} t={t} />
             </div>
 
