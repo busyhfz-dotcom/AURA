@@ -1,6 +1,14 @@
-# AURA Terminal v3.2
+# AURA Terminal v3.3
 
 AURA is an institutional-style market intelligence, risk and execution workspace. The default product language is English; Persian is a first-class RTL locale using the same component system and data contracts.
+
+## v3.3 — Reference shell fidelity + backend-driven terminal state
+
+- The approved three-column terminal composition now holds at standard desktop widths (1280/1366/1440), not only at 1536px+.
+- Market Status now receives non-fabricated volatility and live spread metadata from the backend.
+- Position sizing is previewed through `POST /api/risk/preview`, using the same broker/paper sizing logic as execution.
+- Frontend risk controls follow the server-configured risk ceiling.
+- Paper/simulation mode never invents a live spread or margin value.
 
 ## v3.2 — Reference UI implementation
 
