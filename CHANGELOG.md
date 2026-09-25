@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.3.0 — Shell fidelity + backend-driven terminal state
+
+### Frontend fidelity
+- Promoted the full reference three-column terminal geometry to normal desktop widths (1280/1366/1440), instead of waiting for the 1536px `2xl` breakpoint.
+- Kept the approved Chart → Signal/Execution → Status rail hierarchy intact across desktop and mobile compositions.
+- Bound position sizing fields and market-status cards to backend data instead of duplicating risk math in the browser.
+- Made the execution risk selector honor the backend-configured maximum risk ceiling.
+
+### Backend terminal state
+- Added broker-level market status with live spread points when MT5 is connected and non-fabricated volatility state for both live and simulation feeds.
+- Added `POST /api/risk/preview` so lot sizing, risk amount, stop distance and live margin preview come from the same execution model used by the broker engine.
+- Added market status to REST market snapshots and the realtime WebSocket stream.
+- Added explicit max-risk metadata to health and stream payloads.
+
+### Validation
+- Added foundation coverage that verifies sizing preview matches paper execution sizing.
+- Added coverage ensuring simulation mode never fabricates a live bid/ask spread.
+
 ## 3.2.0 — Reference terminal implementation
 
 ### Approved UI fidelity
