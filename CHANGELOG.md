@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.6.0 — Verified economic News Guard
+
+### Provider & embargo
+- Added configurable Finnhub economic-calendar integration.
+- Normalized verified events by UTC time, currency, impact, actual, estimate and previous values.
+- Added symbol-aware high-impact embargo windows with configurable before/after minutes.
+- Provider failure is fail-closed and never reported as a safe execution window.
+
+### Execution safety
+- Live execution now requires a configured, healthy and currently safe News Guard in addition to existing broker and operator-key controls.
+- Live capability metadata follows the same News Guard readiness contract.
+- Auto Trade exposes missing, unhealthy and active-embargo blockers separately.
+
+### Product surface & validation
+- Rebuilt Economic Calendar and News Guard event rendering around structured data rather than raw payloads.
+- Added English/Persian provider-health and impact copy.
+- Added News Guard unit coverage and repository GitHub Actions CI.
+
 ## 3.5.0 — Verified historical backtesting
 
 ### Backtest engine
