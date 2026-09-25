@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.5.0 — Historical backtesting + verified News Guard
+
+### Backtesting
+- Added a historical, event-based AURA backtest engine with no-lookahead signal evaluation.
+- Added M5/M15/M30/H1/H4 candle retrieval for MT5 and explicitly labeled simulation data.
+- Added pending-entry fill windows, capped hold windows and conservative same-candle SL/TP handling.
+- Added computed equity, return, drawdown, win rate, profit factor, Sharpe-style trade-return metric, average R and expectancy.
+- Backtest output identifies unmodeled commission/slippage instead of inventing execution costs.
+
+### News Guard
+- Added configurable Finnhub economic-calendar adapter with cached normalized events.
+- Added currency-aware high-impact embargo windows.
+- Live execution now fails closed when News Guard is unconfigured, provider health is unknown, or a blocking event is active.
+- Calendar and News Guard UI now render structured provider/event state.
+
+### Quality
+- Added backtest and News Guard safety tests.
+- Added GitHub Actions CI for backend compile/tests and frontend TypeScript/build validation.
+
 ## 3.4.0 — Data-backed product pages
 
 ### Product workspace
