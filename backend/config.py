@@ -44,6 +44,10 @@ class Settings:
     max_trades_per_day: int
     max_daily_loss_percent: float
     execution_api_key: Optional[str]
+    economic_calendar_provider: Optional[str]
+    economic_calendar_api_key: Optional[str]
+    news_embargo_before_minutes: int
+    news_embargo_after_minutes: int
 
     @property
     def live_execution_enabled(self) -> bool:
@@ -78,4 +82,8 @@ def load_settings() -> Settings:
         max_trades_per_day=_int_env("AURA_MAX_TRADES_PER_DAY", 8, 1, 100),
         max_daily_loss_percent=_float_env("AURA_MAX_DAILY_LOSS_PERCENT", 2.0, 0.25, 20.0),
         execution_api_key=os.getenv("AURA_EXECUTION_API_KEY") or None,
+        economic_calendar_provider=(os.getenv("AURA_ECONOMIC_CALENDAR_PROVIDER") or "").strip().lower() or None,
+        economic_calendar_api_key=os.getenv("AURA_ECONOMIC_CALENDAR_API_KEY") or None,
+        news_embargo_before_minutes=_int_env("AURA_NEWS_EMBARGO_BEFORE_MINUTES", 30, 0, 240),
+        news_embargo_after_minutes=_int_env("AURA_NEWS_EMBARGO_AFTER_MINUTES", 15, 0, 240),
     )
