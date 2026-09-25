@@ -17,12 +17,15 @@ from engine.broker_engine import MT5ExecutionEngine
 from engine.institutional_confluence import InstitutionalConfluenceEngine
 from engine.market_filter import MarketFilter
 from ledger import AuraLedger
+from news_guard import NewsGuardService, TradingEconomicsCalendar
 from risk_guard import RiskGuard
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AuraTerminalAPI")
 
 settings = load_settings()
+news_guard_service = NewsGuardService(settings, TradingEconomicsCalendar(settings))
+market_filter = MarketFilter(news_guard_service)
 engine = InstitutionalConfluenceEngine()
 backtester = HistoricalBacktestEngine(engine)
 broker = MT5ExecutionEngine(settings)
@@ -87,13 +90,13 @@ class BacktestRequest(BaseModel):
 
 
 def capabilities() -> dict:
-    news_guard = MarketFilter.news_guard_status()
+    news_guard = market_filter.news_guard_status(settings.default_symbol, refresh=False)
     live_ready = settings.live_execution_enabled and broker.connected and bool(settings.execution_api_key)
     return {
         "paper_execution": settings.execution_mode == "paper",
         "live_execution": live_ready,
         "auto_execution": False,
-        "news_guard": news_guard["configured"],
+        "news_guard": bool(news_guard["configured"] and news_guard.get("healthy") is not False),
         "position_ledger": True,
         "risk_guard": True,
     }
@@ -158,7 +161,7 @@ async def startup_event():
 
 @app.get("/api/health")
 async def health_check():
-    news_guard = MarketFilter.news_guard_status()
+    news_guard = market_filter.news_guard_status(settings.default_symbol, refresh=False)
     return {
         "status": "ONLINE",
         "engine_version": "3.5.0",
@@ -166,7 +169,7 @@ async def health_check():
         "max_risk_percent": settings.max_risk_percent,
         "broker": broker_payload(),
         "capabilities": capabilities(),
-        "active_session": MarketFilter.get_current_session(),
+        "active_session": market_filter.get_current_session(),
         "news_guard": news_guard,
         "risk_guard": risk_guard.status(),
     }
@@ -181,6 +184,7 @@ async def market_snapshot(symbol: str):
         "timestamp": int(time.time()),
         "market_data_source": source,
         "market_status": broker.market_status(symbol, df=df, source=source),
+        "news_guard": market_filter.news_guard_status(symbol=symbol, refresh=False),
         "signal": analysis,
         "candles": [
             {
@@ -277,19 +281,34 @@ async def analytics():
 
 @app.get("/api/calendar")
 async def calendar():
-    guard = MarketFilter.news_guard_status()
+    guard = market_filter.news_guard_status(include_events=True, refresh=True)
     return {
         "configured": guard["configured"],
+        "healthy": guard.get("healthy"),
         "provider": guard.get("provider"),
         "guard_active": guard["active"],
+        "blocking": guard.get("blocking", False),
         "message": guard.get("message"),
-        "events": [],
+        "events": guard.get("events", []),
+        "next_event": guard.get("next_event"),
+        "block_before_minutes": guard.get("block_before_minutes"),
+        "block_after_minutes": guard.get("block_after_minutes"),
     }
 
 
+@app.get("/api/news-guard/{symbol}")
+async def news_guard_status(symbol: str):
+    return market_filter.news_guard_status(
+        symbol=symbol.upper().strip(),
+        include_events=True,
+        refresh=True,
+    )
+
+
 @app.get("/api/auto-trade")
-async def auto_trade_status():
-    news_guard = MarketFilter.news_guard_status()
+async def auto_trade_status(symbol: str = ""):
+    symbol = (symbol or settings.default_symbol).upper().strip()
+    news_guard = market_filter.news_guard_status(symbol=symbol, refresh=True)
     blockers = []
     if settings.execution_mode != "live":
         blockers.append("LIVE_MODE_REQUIRED")
@@ -299,11 +318,16 @@ async def auto_trade_status():
         blockers.append("EXECUTION_KEY_REQUIRED")
     if not news_guard["configured"]:
         blockers.append("NEWS_GUARD_REQUIRED")
+    elif news_guard.get("healthy") is False:
+        blockers.append("NEWS_GUARD_UNHEALTHY")
+    elif news_guard.get("active"):
+        blockers.append("NEWS_EMBARGO_ACTIVE")
     blockers.append("AUTOPILOT_WORKER_NOT_DEPLOYED")
     return {
         "enabled": False,
         "ready": False,
         "blockers": blockers,
+        "symbol": symbol,
         "broker": broker_payload(),
         "news_guard": news_guard,
         "risk_guard": risk_guard.status(),
@@ -426,10 +450,18 @@ async def execute_trade(
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid operator execution key.")
 
-    if MarketFilter.is_news_embargo_active():
+    news_guard = market_filter.news_guard_status(symbol=symbol, refresh=settings.live_execution_enabled)
+    if settings.live_execution_enabled and news_guard.get("blocking"):
+        code = "NEWS_EMBARGO_ACTIVE" if news_guard.get("active") else "NEWS_PROVIDER_UNAVAILABLE"
+        ledger.add_audit(
+            "execution.news_blocked",
+            news_guard.get("message") or "News Guard blocked live execution.",
+            severity="warning",
+            metadata={"symbol": symbol, "code": code, "provider": news_guard.get("provider")},
+        )
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
-            detail="Economic news guard is active. Execution is temporarily blocked.",
+            detail={"code": code, "message": news_guard.get("message")},
         )
 
     decision = risk_guard.evaluate(symbol)
@@ -525,8 +557,8 @@ async def websocket_signals(websocket: WebSocket):
                 "max_risk_percent": settings.max_risk_percent,
                 "broker": broker_payload(),
                 "capabilities": capabilities(),
-                "active_session": MarketFilter.get_current_session(),
-                "news_guard": MarketFilter.news_guard_status(),
+                "active_session": market_filter.get_current_session(),
+                "news_guard": market_filter.news_guard_status(symbol=symbol, refresh=False),
                 "risk_guard": risk_guard.status(),
                 "portfolio": portfolio_payload(),
                 "signal": analysis,
