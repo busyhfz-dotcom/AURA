@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -9,6 +10,7 @@ from config import Settings
 from engine.broker_engine import MT5ExecutionEngine
 from engine.institutional_confluence import InstitutionalConfluenceEngine
 from ledger import AuraLedger
+from news_guard import NewsGuardService
 from risk_guard import RiskGuard
 
 
@@ -189,6 +191,89 @@ class AuraFoundationTests(unittest.TestCase):
             self.assertEqual(saved["id"], run_id)
             self.assertEqual(saved["source"], "USER_OHLC")
             self.assertEqual(ledger.recent_backtests(5)[0]["id"], run_id)
+
+
+
+    def test_news_guard_blocks_relevant_high_impact_event(self):
+        class FakeProvider:
+            provider_name = "Fake Calendar"
+            configured = True
+            def cached_events(self, now=None, days=2):
+                return None
+            def fetch_events(self, now=None, days=2):
+                return [{
+                    "id": "1",
+                    "date": "2026-09-25T12:00:00+00:00",
+                    "country": "United States",
+                    "currency": "USD",
+                    "category": "Labour",
+                    "event": "Payrolls",
+                    "importance": 3,
+                    "actual": None,
+                    "previous": None,
+                    "forecast": None,
+                    "te_forecast": None,
+                    "source": "Test",
+                    "date_confirmed": True,
+                }]
+
+        service = NewsGuardService(self.settings("paper"), FakeProvider())
+        status = service.status(
+            symbol="EURUSD",
+            now=datetime(2026, 9, 25, 11, 45, tzinfo=timezone.utc),
+            include_events=True,
+        )
+        self.assertTrue(status["configured"])
+        self.assertTrue(status["healthy"])
+        self.assertTrue(status["active"])
+        self.assertTrue(status["blocking"])
+        self.assertEqual(status["active_events"][0]["currency"], "USD")
+
+    def test_news_guard_ignores_irrelevant_currency(self):
+        class FakeProvider:
+            provider_name = "Fake Calendar"
+            configured = True
+            def cached_events(self, now=None, days=2):
+                return None
+            def fetch_events(self, now=None, days=2):
+                return [{
+                    "id": "2",
+                    "date": "2026-09-25T12:00:00+00:00",
+                    "country": "Japan",
+                    "currency": "JPY",
+                    "category": "Rates",
+                    "event": "Rate Decision",
+                    "importance": 3,
+                    "actual": None,
+                    "previous": None,
+                    "forecast": None,
+                    "te_forecast": None,
+                    "source": "Test",
+                    "date_confirmed": True,
+                }]
+
+        service = NewsGuardService(self.settings("paper"), FakeProvider())
+        status = service.status(
+            symbol="EURUSD",
+            now=datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc),
+        )
+        self.assertFalse(status["active"])
+        self.assertFalse(status["blocking"])
+
+    def test_news_guard_fails_closed_when_configured_provider_errors(self):
+        class FailingProvider:
+            provider_name = "Fake Calendar"
+            configured = True
+            def cached_events(self, now=None, days=2):
+                return None
+            def fetch_events(self, now=None, days=2):
+                raise RuntimeError("provider unavailable")
+
+        service = NewsGuardService(self.settings("paper"), FailingProvider())
+        status = service.status(symbol="EURUSD")
+        self.assertTrue(status["configured"])
+        self.assertFalse(status["healthy"])
+        self.assertTrue(status["blocking"])
 
 
 if __name__ == "__main__":
