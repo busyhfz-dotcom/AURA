@@ -1,0 +1,48 @@
+name: AURA CI
+
+on:
+  push:
+    branches:
+      - main
+      - aura-roadmap-phase1-shell-qa
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+      - name: Compile backend
+        run: python -m compileall -q .
+      - name: Run foundation tests
+        run: python -m unittest discover -s tests -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_AURA_API_URL: http://localhost:8000
