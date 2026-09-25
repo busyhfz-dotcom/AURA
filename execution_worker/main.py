@@ -44,6 +44,12 @@ MT5_PASSWORD = os.getenv("MT5_PASSWORD") or None
 MT5_SERVER = os.getenv("MT5_SERVER") or None
 
 
+class CandlesRequest(BaseModel):
+    symbol: str = Field(min_length=3, max_length=16)
+    timeframe: Literal["M1", "M5", "M15", "M30", "H1", "H4", "D1"] = "M15"
+    bars: int = Field(default=200, ge=40, le=5000)
+
+
 class ExecuteRequest(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=128)
     symbol: str = Field(min_length=3, max_length=16)
@@ -184,6 +190,38 @@ class MT5Worker:
     def _ensure(self) -> None:
         if not self.connected:
             raise RuntimeError(self.reason or "MT5 worker is not connected.")
+
+    def candles(self, symbol: str, timeframe: str, bars: int) -> dict:
+        self._ensure()
+        symbol = symbol.upper().strip()
+        if not mt5.symbol_select(symbol, True):
+            raise RuntimeError(f"Unable to select {symbol} in MT5.")
+        timeframe_map = {
+            "M1": mt5.TIMEFRAME_M1,
+            "M5": mt5.TIMEFRAME_M5,
+            "M15": mt5.TIMEFRAME_M15,
+            "M30": mt5.TIMEFRAME_M30,
+            "H1": mt5.TIMEFRAME_H1,
+            "H4": mt5.TIMEFRAME_H4,
+            "D1": mt5.TIMEFRAME_D1,
+        }
+        if timeframe not in timeframe_map:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+        rates = mt5.copy_rates_from_pos(symbol, timeframe_map[timeframe], 0, max(40, min(int(bars), 5000)))
+        if rates is None or len(rates) == 0:
+            raise RuntimeError(f"No MT5 historical candles are available for {symbol} {timeframe}.")
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "source": "MT5_WORKER",
+            "candles": [{
+                "time": int(row["time"]),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+            } for row in rates],
+        }
 
     def positions(self) -> list[dict]:
         self._ensure()
@@ -426,6 +464,18 @@ async def verify_signature(
 async def health(request: Request, x_aura_timestamp: str | None = Header(default=None), x_aura_signature: str | None = Header(default=None)):
     await verify_signature(request, x_aura_timestamp, x_aura_signature)
     return {**broker.health(), "worker_version": "3.7.0", "idempotency_store": True}
+
+
+@app.post("/market/candles")
+async def market_candles(request: Request, x_aura_timestamp: str | None = Header(default=None), x_aura_signature: str | None = Header(default=None)):
+    raw = await verify_signature(request, x_aura_timestamp, x_aura_signature)
+    payload = CandlesRequest.model_validate_json(raw)
+    try:
+        return broker.candles(payload.symbol, payload.timeframe, payload.bars)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @app.get("/positions")
