@@ -78,6 +78,16 @@ class ExecutionWorkerClient:
             raise RuntimeError(response.payload.get("detail") or "Execution worker health check failed.")
         return response.payload
 
+    def candles(self, symbol: str, timeframe: str = "M15", bars: int = 200) -> dict:
+        response = self._request("POST", "/market/candles", {
+            "symbol": symbol.upper().strip(),
+            "timeframe": timeframe.upper().strip(),
+            "bars": int(bars),
+        })
+        if not response.ok:
+            raise RuntimeError(response.payload.get("detail") or "Unable to read MT5 worker candles.")
+        return response.payload
+
     def positions(self) -> list[dict]:
         response = self._request("GET", "/positions")
         if not response.ok:
