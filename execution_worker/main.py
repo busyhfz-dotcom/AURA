@@ -105,6 +105,7 @@ class WorkerStore:
                 if item["request_hash"] != request_hash:
                     raise ValueError("Idempotency key is already bound to another request.")
                 item["result"] = json.loads(item["result_json"]) if item.get("result_json") else None
+                item["is_new"] = False
                 return item
 
             self._conn.execute(
@@ -115,7 +116,7 @@ class WorkerStore:
                 """,
                 (key, request_hash, now, now),
             )
-        return {"idempotency_key": key, "state": "PENDING", "result": None}
+        return {"idempotency_key": key, "state": "PENDING", "result": None, "is_new": True}
 
     def complete(self, key: str, result: dict) -> None:
         with self._lock, self._conn:
@@ -454,7 +455,7 @@ async def execute(request: Request, x_aura_timestamp: str | None = Header(defaul
     if reservation["state"] == "COMPLETED" and reservation.get("result"):
         return {**reservation["result"], "idempotent_replay": True}
 
-    if reservation["state"] in {"PENDING", "UNKNOWN"} and reservation.get("created_at"):
+    if not reservation.get("is_new") and reservation["state"] in {"PENDING", "UNKNOWN"}:
         recovered = broker.recover(payload.idempotency_key, payload)
         if recovered:
             store.complete(payload.idempotency_key, recovered)
@@ -464,6 +465,10 @@ async def execute(request: Request, x_aura_timestamp: str | None = Header(defaul
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Execution state is unknown and no matching MT5 deal was recovered. Manual reconciliation is required.",
             )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An execution with this idempotency key is already in progress.",
+        )
 
     try:
         result = broker.execute(payload)
