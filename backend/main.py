@@ -31,7 +31,7 @@ risk_guard = RiskGuard(
 
 app = FastAPI(
     title="AURA Market Intelligence API",
-    version="3.2.0",
+    version="3.3.0",
     description="Market structure analytics, durable execution audit and guarded trading infrastructure for AURA Terminal.",
 )
 
@@ -50,6 +50,14 @@ class ExecutionRequest(BaseModel):
     entry: float = Field(gt=0)
     sl: float = Field(gt=0)
     tp: float = Field(gt=0)
+    risk_percent: float = Field(default=0.5, ge=0.1, le=2.0)
+
+
+class SizingRequest(BaseModel):
+    symbol: str = Field(min_length=3, max_length=16)
+    action: Literal["BUY", "SELL"]
+    entry: float = Field(gt=0)
+    sl: float = Field(gt=0)
     risk_percent: float = Field(default=0.5, ge=0.1, le=2.0)
 
 
@@ -119,7 +127,7 @@ async def startup_event():
     ledger.add_audit(
         "system.start",
         "AURA API started.",
-        metadata={"version": "3.2.0", "execution_mode": settings.execution_mode},
+        metadata={"version": "3.3.0", "execution_mode": settings.execution_mode},
     )
 
 
@@ -128,7 +136,7 @@ async def health_check():
     news_guard = MarketFilter.news_guard_status()
     return {
         "status": "ONLINE",
-        "engine_version": "3.2.0",
+        "engine_version": "3.3.0",
         "execution_mode": settings.execution_mode.upper(),
         "broker": broker_payload(),
         "capabilities": capabilities(),
@@ -146,6 +154,7 @@ async def market_snapshot(symbol: str):
     return {
         "timestamp": int(time.time()),
         "market_data_source": source,
+        "market_status": broker.market_status(symbol, df=df, source=source),
         "signal": analysis,
         "candles": [
             {
@@ -197,6 +206,25 @@ async def portfolio():
 @app.get("/api/audit")
 async def audit(limit: int = 30):
     return {"events": ledger.recent_audit(limit)}
+
+
+@app.post("/api/risk/preview")
+async def risk_preview(request: SizingRequest):
+    symbol = request.symbol.upper().strip()
+    try:
+        preview = broker.preview_position_size(
+            symbol=symbol,
+            action=request.action,
+            entry=request.entry,
+            sl=request.sl,
+            risk_percent=request.risk_percent,
+            balance=ledger.metrics()["balance"],
+        )
+        return {**preview, "risk_guard": risk_guard.status()}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @app.post("/api/trade/execute")
@@ -315,6 +343,7 @@ async def websocket_signals(websocket: WebSocket):
                 "timestamp": int(time.time()),
                 "engine_version": "3.2.0",
                 "market_data_source": source,
+                "market_status": broker.market_status(symbol, df=df, source=source),
                 "execution_mode": settings.execution_mode.upper(),
                 "broker": broker_payload(),
                 "capabilities": capabilities(),
