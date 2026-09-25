@@ -218,7 +218,7 @@ export default function BacktestingView({ selectedSymbol, t }: { selectedSymbol:
             <label><span className="mb-1 block text-[8px] text-[#71869b]">{t.symbol}</span><input value={symbol} onChange={event => setSymbol(event.target.value.toUpperCase())} className="aura-field force-ltr" /></label>
             <label><span className="mb-1 block text-[8px] text-[#71869b]">{t.timeframe}</span><select value={timeframe} onChange={event => setTimeframe(event.target.value)} className="aura-field"><option>M1</option><option>M5</option><option>M15</option><option>M30</option><option>H1</option><option>H4</option><option>D1</option></select></label>
             <label><span className="mb-1 block text-[8px] text-[#71869b]">{t.initialBalance}</span><input type="number" min="100" value={initialBalance} onChange={event => setInitialBalance(Math.max(100, Number(event.target.value) || 100))} className="aura-field force-ltr" /></label>
-            <label><span className="mb-1 block text-[8px] text-[#71869b]">{t.riskPercent}</span><input type="number" min=".1" max="2" step=".1" value={riskPercent} onChange={event => setRiskPercent(Math.min(2, Math.max(.1, Number(event.target.value) || .1)))} className="aura-field force-ltr" /></label>
+            <label><span className="mb-1 block text-[8px] text-[#71869b]">{t.riskPercent}</span><input type="number" min=".1" max={capabilities?.max_risk_percent || 1} step=".1" value={riskPercent} onChange={event => setRiskPercent(Math.min(capabilities?.max_risk_percent || 1, Math.max(.1, Number(event.target.value) || .1)))} className="aura-field force-ltr" /></label>
           </div>
 
           {source === "UPLOAD" ? (
