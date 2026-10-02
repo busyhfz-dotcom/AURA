@@ -1,3 +1,9 @@
+"""Economic calendar adapter with a strict no-fabrication policy.
+
+Finnhub is used when configured (free tier API key at finnhub.io). If the
+provider is unavailable, stale, malformed, or unconfigured, the service
+reports that state and never claims a news window is safe.
+"""
 from __future__ import annotations
 
 import logging
@@ -9,22 +15,16 @@ from typing import Any, Optional
 import pandas as pd
 import requests
 
-logger = logging.getLogger("AuraEconomicCalendar")
+logger = logging.getLogger("VertexEconomicCalendar")
 
 
 class EconomicCalendarService:
-    """Economic calendar adapter with a strict no-fabrication policy.
-
-    Finnhub is used when configured. If the provider is unavailable, stale, malformed,
-    or unconfigured, the service reports that state and never claims the news guard is safe.
-    """
-
     FINNHUB_URL = "https://finnhub.io/api/v1/calendar/economic"
 
     def __init__(
         self,
-        provider: str | None,
-        api_key: str | None,
+        provider: Optional[str],
+        api_key: Optional[str],
         embargo_before_minutes: int = 30,
         embargo_after_minutes: int = 15,
         cache_seconds: int = 300,
@@ -37,24 +37,21 @@ class EconomicCalendarService:
         self._lock = threading.RLock()
         self._cached_at = 0.0
         self._events: list[dict[str, Any]] = []
-        self._last_error: str | None = None
+        self._last_error: Optional[str] = None
 
     @property
     def configured(self) -> bool:
         return self.provider == "finnhub" and bool(self.api_key)
 
     @staticmethod
-    def _symbol_currencies(symbol: str | None) -> set[str]:
+    def _symbol_currencies(symbol: Optional[str]) -> set[str]:
         if not symbol:
             return set()
         symbol = symbol.upper().strip()
         explicit = {
-            "XAUUSD": {"USD"},
-            "BTCUSD": {"USD"},
-            "ETHUSD": {"USD"},
-            "NAS100": {"USD"},
-            "SP500": {"USD"},
-            "USOIL": {"USD"},
+            "XAUUSD": {"USD"}, "XAGUSD": {"USD"},
+            "BTCUSDT": {"USD"}, "ETHUSDT": {"USD"}, "SOLUSDT": {"USD"},
+            "BNBUSDT": {"USD"}, "XRPUSDT": {"USD"}, "DOGEUSDT": {"USD"},
         }
         if symbol in explicit:
             return explicit[symbol]
@@ -86,7 +83,7 @@ class EconomicCalendarService:
             return None
         return None
 
-    def _normalize(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+    def _normalize(self, raw: dict[str, Any]) -> Optional[dict[str, Any]]:
         event_time = self._event_time(raw)
         if event_time is None:
             return None
@@ -94,14 +91,9 @@ class EconomicCalendarService:
         currency = str(raw.get("currency") or raw.get("unit") or "").strip().upper()
         if len(currency) != 3 or not currency.isalpha():
             currency = {
-                "UNITED STATES": "USD",
-                "US": "USD",
-                "USA": "USD",
-                "EURO AREA": "EUR",
-                "EUROZONE": "EUR",
-                "UNITED KINGDOM": "GBP",
-                "UK": "GBP",
-                "JAPAN": "JPY",
+                "UNITED STATES": "USD", "US": "USD", "USA": "USD",
+                "EURO AREA": "EUR", "EUROZONE": "EUR",
+                "UNITED KINGDOM": "GBP", "UK": "GBP", "JAPAN": "JPY",
             }.get(country, "")
 
         return {
@@ -113,7 +105,6 @@ class EconomicCalendarService:
             "actual": raw.get("actual"),
             "estimate": raw.get("estimate") if "estimate" in raw else raw.get("forecast"),
             "previous": raw.get("prev") if "prev" in raw else raw.get("previous"),
-            "unit": raw.get("unit"),
         }
 
     def _fetch_finnhub(self) -> list[dict[str, Any]]:
@@ -123,50 +114,42 @@ class EconomicCalendarService:
             "to": (now.date() + timedelta(days=2)).isoformat(),
         }
         response = requests.get(
-            self.FINNHUB_URL,
-            params=params,
-            headers={"X-Finnhub-Token": self.api_key or ""},
-            timeout=8,
+            self.FINNHUB_URL, params=params,
+            headers={"X-Finnhub-Token": self.api_key or ""}, timeout=8,
         )
         response.raise_for_status()
         payload = response.json()
         rows = payload.get("economicCalendar", payload if isinstance(payload, list) else [])
         if not isinstance(rows, list):
             raise RuntimeError("Economic calendar provider returned an unexpected payload.")
-
-        events = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            event = self._normalize(row)
-            if event:
-                events.append(event)
+        events = [event for row in rows if isinstance(row, dict) and (event := self._normalize(row))]
         events.sort(key=lambda item: item["time"])
         return events
 
     def refresh(self, force: bool = False) -> list[dict[str, Any]]:
         if not self.configured:
             return []
-
         with self._lock:
             if not force and self._cached_at and time.time() - self._cached_at < self.cache_seconds:
                 return list(self._events)
             try:
-                if self.provider == "finnhub":
-                    events = self._fetch_finnhub()
-                else:
-                    raise RuntimeError(f"Unsupported economic calendar provider: {self.provider}")
+                events = self._fetch_finnhub()
                 self._events = events
                 self._cached_at = time.time()
                 self._last_error = None
             except Exception as exc:
                 logger.warning("Economic calendar refresh failed: %s", exc)
                 self._last_error = str(exc)
-                # Do not refresh the cache timestamp on failure. Existing events can remain
-                # visible, but status() will report provider_error and will not claim SAFE.
+                # Back off for cache_seconds even on failure. Without this,
+                # status() is called once per symbol per scan/analysis cycle,
+                # and since _cached_at was never set, every single one of
+                # those calls re-hit Finnhub immediately — turning one 403
+                # (e.g. a plan/tier restriction) into a continuous hammering
+                # of the endpoint instead of a periodic retry.
+                self._cached_at = time.time()
             return list(self._events)
 
-    def upcoming(self, hours: int = 24, symbol: str | None = None) -> list[dict[str, Any]]:
+    def upcoming(self, hours: int = 48, symbol: Optional[str] = None) -> list[dict[str, Any]]:
         events = self.refresh()
         now = datetime.now(timezone.utc)
         end = now + timedelta(hours=max(1, min(int(hours), 168)))
@@ -181,34 +164,26 @@ class EconomicCalendarService:
             result.append(event)
         return result
 
-    def status(self, symbol: str | None = None) -> dict[str, Any]:
+    def status(self, symbol: Optional[str] = None) -> dict[str, Any]:
         if not self.configured:
             return {
-                "configured": False,
-                "active": False,
-                "safe": False,
-                "provider": self.provider,
+                "configured": False, "active": False, "safe": False, "provider": self.provider,
                 "provider_error": None,
                 "message": "Economic calendar provider not configured.",
                 "embargo_before_minutes": self.embargo_before_minutes,
                 "embargo_after_minutes": self.embargo_after_minutes,
                 "blocking_events": [],
             }
-
         events = self.refresh()
         if self._last_error:
             return {
-                "configured": True,
-                "active": False,
-                "safe": False,
-                "provider": self.provider,
+                "configured": True, "active": False, "safe": False, "provider": self.provider,
                 "provider_error": self._last_error,
-                "message": "Economic calendar provider is unavailable; News Guard cannot assert a safe window.",
+                "message": "Economic calendar provider is unavailable.",
                 "embargo_before_minutes": self.embargo_before_minutes,
                 "embargo_after_minutes": self.embargo_after_minutes,
                 "blocking_events": [],
             }
-
         now = datetime.now(timezone.utc)
         currencies = self._symbol_currencies(symbol)
         blocking = []
@@ -222,18 +197,10 @@ class EconomicCalendarService:
             window_end = event_time + timedelta(minutes=self.embargo_after_minutes)
             if window_start <= now <= window_end:
                 blocking.append(event)
-
         return {
-            "configured": True,
-            "active": bool(blocking),
-            "safe": not blocking,
-            "provider": self.provider,
-            "provider_error": None,
-            "message": (
-                "High-impact economic news embargo is active."
-                if blocking
-                else "No matching high-impact event is inside the configured embargo window."
-            ),
+            "configured": True, "active": bool(blocking), "safe": not blocking,
+            "provider": self.provider, "provider_error": None,
+            "message": "High-impact economic news embargo is active." if blocking else "No blocking event in window.",
             "embargo_before_minutes": self.embargo_before_minutes,
             "embargo_after_minutes": self.embargo_after_minutes,
             "blocking_events": blocking,

@@ -3,6 +3,8 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/.env*.local
+frontend/tsconfig.tsbuildinfo
+frontend/next-env.d.ts
 
 # Backend
 __pycache__/
@@ -10,10 +12,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
-backend/data/*.json
 backend/data/*.db
 backend/data/*.db-*
-!backend/data/.gitkeep
 
 # Environment / OS
 .env
@@ -23,3 +23,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Dependencies at any nesting level
+node_modules/

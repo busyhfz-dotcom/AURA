@@ -1,15 +1,6 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
-
-
-def _optional_int(value: Optional[str]) -> Optional[int]:
-    if not value:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
 
 
 def _int_env(name: str, default: int, low: int, high: int) -> int:
@@ -28,62 +19,76 @@ def _float_env(name: str, default: float, low: float, high: float) -> float:
     return max(low, min(value, high))
 
 
+def _list_env(name: str, default: list[str]) -> list[str]:
+    raw = os.getenv(name)
+    if not raw:
+        return default
+    return [item.strip().upper() for item in raw.split(",") if item.strip()]
+
+
+CRYPTO_WATCHLIST_DEFAULT = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT",
+]
+FOREX_WATCHLIST_DEFAULT = [
+    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "XAUUSD",
+]
+
+
 @dataclass(frozen=True)
 class Settings:
-    execution_mode: str
-    mt5_account: Optional[int]
-    mt5_password: Optional[str]
-    mt5_server: Optional[str]
+    brand_name: str
     cors_origins: list[str]
-    default_symbol: str
-    max_risk_percent: float
-    mt5_deviation: int
     database_path: str
-    paper_starting_balance: float
-    max_open_positions: int
-    max_trades_per_day: int
-    max_daily_loss_percent: float
-    execution_api_key: Optional[str]
+
+    crypto_watchlist: list[str]
+    forex_watchlist: list[str]
+
+    forex_provider: Optional[str]
+    forex_api_key: Optional[str]
+
     economic_calendar_provider: Optional[str]
     economic_calendar_api_key: Optional[str]
     news_embargo_before_minutes: int
     news_embargo_after_minutes: int
 
-    @property
-    def live_execution_enabled(self) -> bool:
-        return self.execution_mode == "live"
+    telegram_bot_token: Optional[str]
+    telegram_chat_id: Optional[str]
+
+    scan_interval_seconds: int
+    analysis_interval_seconds: int
+    high_volatility_threshold_percent: float
+    high_risk_score_threshold: int
 
 
 def load_settings() -> Settings:
-    raw_mode = os.getenv("AURA_EXECUTION_MODE", "paper").strip().lower()
-    execution_mode = raw_mode if raw_mode in {"paper", "live"} else "paper"
-
     origins = [
         origin.strip()
         for origin in os.getenv(
-            "AURA_CORS_ORIGINS",
+            "VERTEX_CORS_ORIGINS",
             "http://localhost:3000,http://127.0.0.1:3000",
         ).split(",")
         if origin.strip()
     ]
 
+    forex_provider = (os.getenv("VERTEX_FOREX_PROVIDER") or "").strip().lower() or None
+    economic_provider = (os.getenv("VERTEX_ECONOMIC_CALENDAR_PROVIDER") or "").strip().lower() or None
+
     return Settings(
-        execution_mode=execution_mode,
-        mt5_account=_optional_int(os.getenv("MT5_ACCOUNT")),
-        mt5_password=os.getenv("MT5_PASSWORD") or None,
-        mt5_server=os.getenv("MT5_SERVER") or None,
+        brand_name=os.getenv("VERTEX_BRAND_NAME", "VERTEX"),
         cors_origins=origins,
-        default_symbol=os.getenv("AURA_DEFAULT_SYMBOL", "EURUSD").upper(),
-        max_risk_percent=_float_env("AURA_MAX_RISK_PERCENT", 1.0, 0.1, 2.0),
-        mt5_deviation=_int_env("AURA_MT5_DEVIATION", 20, 1, 100),
-        database_path=os.getenv("AURA_DATABASE_PATH", "./data/aura.db"),
-        paper_starting_balance=_float_env("AURA_PAPER_STARTING_BALANCE", 10_000.0, 100.0, 100_000_000.0),
-        max_open_positions=_int_env("AURA_MAX_OPEN_POSITIONS", 3, 1, 20),
-        max_trades_per_day=_int_env("AURA_MAX_TRADES_PER_DAY", 8, 1, 100),
-        max_daily_loss_percent=_float_env("AURA_MAX_DAILY_LOSS_PERCENT", 2.0, 0.25, 20.0),
-        execution_api_key=os.getenv("AURA_EXECUTION_API_KEY") or None,
-        economic_calendar_provider=(os.getenv("AURA_ECONOMIC_CALENDAR_PROVIDER") or "").strip().lower() or None,
-        economic_calendar_api_key=os.getenv("AURA_ECONOMIC_CALENDAR_API_KEY") or None,
-        news_embargo_before_minutes=_int_env("AURA_NEWS_EMBARGO_BEFORE_MINUTES", 30, 0, 240),
-        news_embargo_after_minutes=_int_env("AURA_NEWS_EMBARGO_AFTER_MINUTES", 15, 0, 240),
+        database_path=os.getenv("VERTEX_DATABASE_PATH", "./data/vertex.db"),
+        crypto_watchlist=_list_env("VERTEX_CRYPTO_WATCHLIST", CRYPTO_WATCHLIST_DEFAULT),
+        forex_watchlist=_list_env("VERTEX_FOREX_WATCHLIST", FOREX_WATCHLIST_DEFAULT),
+        forex_provider=forex_provider,
+        forex_api_key=os.getenv("VERTEX_FOREX_API_KEY") or None,
+        economic_calendar_provider=economic_provider,
+        economic_calendar_api_key=os.getenv("VERTEX_ECONOMIC_CALENDAR_API_KEY") or None,
+        news_embargo_before_minutes=_int_env("VERTEX_NEWS_EMBARGO_BEFORE_MINUTES", 30, 0, 240),
+        news_embargo_after_minutes=_int_env("VERTEX_NEWS_EMBARGO_AFTER_MINUTES", 15, 0, 240),
+        telegram_bot_token=os.getenv("VERTEX_TELEGRAM_BOT_TOKEN") or None,
+        telegram_chat_id=os.getenv("VERTEX_TELEGRAM_CHAT_ID") or None,
+        scan_interval_seconds=_int_env("VERTEX_SCAN_INTERVAL_SECONDS", 20, 5, 300),
+        analysis_interval_seconds=_int_env("VERTEX_ANALYSIS_INTERVAL_SECONDS", 120, 30, 900),
+        high_volatility_threshold_percent=_float_env("VERTEX_HIGH_VOLATILITY_THRESHOLD_PERCENT", 1.5, 0.1, 20.0),
+        high_risk_score_threshold=_int_env("VERTEX_HIGH_RISK_SCORE_THRESHOLD", 70, 10, 100),
     )

@@ -1,8 +1,8 @@
-name: AURA CI
+name: VERTEX CI
 
 on:
   push:
-    branches: [main, "aura-*"]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
