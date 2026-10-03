@@ -16,6 +16,17 @@ export function recLabel(recommendation: string, t: Dictionary) {
   return t.wait;
 }
 
+export function overrideLabel(analysis: TradeAnalysis, t: Dictionary): string {
+  switch (analysis.override_code) {
+    case 'INCOMPLETE_DATA': return t.riskOverrideData;
+    case 'NEWS_EMBARGO': return t.riskOverrideNews;
+    case 'NEWS_UNKNOWN': return t.riskOverrideUnknownNews;
+    case 'HIGH_RISK': return t.riskOverrideHigh;
+    case 'NO_ENTRY_TRIGGER': return t.riskOverrideTrigger;
+    default: return t.riskOverrideOther;
+  }
+}
+
 export function TradeDeskList({
   analyses, selected, onSelect, unavailableSymbols, t,
 }: { analyses: TradeAnalysis[]; selected: string | null; onSelect: (s: string) => void; unavailableSymbols?: Set<string>; t: Dictionary }) {
@@ -112,7 +123,7 @@ export function TradeDeskDetail({ analysis, unavailable = false, t }: { analysis
       {analysis.override_reason && (
         <div className="flex items-start gap-2 rounded-md border border-[#5c421a] bg-[#3a2a10] p-2.5 text-[11px] text-[#ffb24a]">
           <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>{analysis.risk_label === 'HIGH' ? t.riskOverrideHigh : t.riskOverrideOther}</span>
+          <span>{overrideLabel(analysis, t)}</span>
         </div>
       )}
 

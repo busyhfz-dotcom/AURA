@@ -11,7 +11,10 @@ import asyncio
 import logging
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+import pandas as pd
 
 from alerts.alert_engine import AlertEngine
 from config import Settings
@@ -23,6 +26,20 @@ from providers.forex_provider import ForexProvider
 from providers.market_data import MarketDataHub
 
 logger = logging.getLogger("VertexScheduler")
+
+_BAR_DURATION = {"15m": timedelta(minutes=15), "1h": timedelta(hours=1), "4h": timedelta(hours=4)}
+
+
+def completed_candles(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """Exclude the live bar so a transient intrabar pattern cannot trigger a call."""
+    if df.empty or "time" not in df.columns:
+        return df.iloc[0:0].copy()
+    timestamps = pd.to_datetime(df["time"], utc=True, errors="coerce")
+    cutoff = pd.Timestamp(datetime.now(timezone.utc) - _BAR_DURATION[timeframe])
+    closed = df.loc[timestamps <= cutoff].copy().reset_index(drop=True)
+    if closed.empty or pd.Timestamp(datetime.now(timezone.utc)) - pd.Timestamp(closed["time"].iloc[-1]) > 3 * _BAR_DURATION[timeframe]:
+        return df.iloc[0:0].copy()
+    return closed
 
 class MarketMonitor:
     def __init__(
@@ -91,13 +108,16 @@ class MarketMonitor:
 
     def analysis_counts_by_class(self) -> dict[str, int]:
         return {"crypto": self._crypto_analysis_count, "forex": self._forex_analysis_count}
-    def _scan_symbol(self, symbol: str) -> dict[str, Any] | None:
+    def _scan_symbol(self, symbol: str, store=None) -> dict[str, Any] | None:
         try:
             # limit=220 matches _analyze_symbol's 15m request below so the two
             # loops share one forex-provider cache entry instead of each
             # paying for their own Twelve Data call on every cycle (see the
             # rate-limit note in providers/forex_provider.py).
             df, source, asset_class = self.market_data.get_candles(symbol, interval="15m", limit=220)
+            closed_df = completed_candles(df, "15m")
+            if store is not None and not df.empty:
+                store.add_closed_candles(symbol, asset_class, source, "15m", closed_df)
             # For crypto, Binance's 24h ticker is its own cheap public call, so
             # keep using it. For forex/metals, derive the snapshot from the
             # candles we just fetched instead of also calling Twelve Data's
@@ -107,7 +127,7 @@ class MarketMonitor:
                 snapshot = self.market_data.get_snapshot(symbol)
             else:
                 snapshot = ForexProvider.snapshot_from_candles(symbol, df)
-            signal = self.confluence.find_setup(df, symbol)
+            signal = self.confluence.find_setup(closed_df, symbol)
             killzone = signal.get("checklist", {}).get("killzone_active", False)
             news_status = self.calendar_service.status(symbol)
             change_percent_24h = snapshot.get("price_change_percent") if snapshot else None
@@ -115,13 +135,13 @@ class MarketMonitor:
             risk = self.risk_engine.score(
                 symbol=symbol,
                 asset_class=asset_class,
-                df=df,
+                df=closed_df,
                 killzone_active=bool(killzone),
                 news_active=bool(news_status.get("active")),
                 change_percent_24h=change_percent_24h,
             )
 
-            data_available = not df.empty
+            data_available = not closed_df.empty
             fired_alerts: list[dict[str, Any]] = []
             if data_available:
                 fired_alerts = self.alert_engine.evaluate(symbol, asset_class, risk, signal)
@@ -157,7 +177,7 @@ class MarketMonitor:
         logger.info("Vertex %s scan starting; watching %d symbols every %ss", label, len(symbols), interval)
         while True:
             for symbol in symbols:
-                record = await asyncio.to_thread(self._scan_symbol, symbol)
+                record = await asyncio.to_thread(self._scan_symbol, symbol, store)
                 if record and record["data_available"]:
                     store.add_risk_snapshot(record["risk"])
             if label == "crypto":
@@ -171,8 +191,10 @@ class MarketMonitor:
             frames: dict[str, Any] = {}
             asset_class = None
             for timeframe in TREND_TIMEFRAMES:
-                df, _source, asset_class = self.market_data.get_candles(symbol, interval=timeframe, limit=220)
-                frames[timeframe] = df
+                df, source, asset_class = self.market_data.get_candles(symbol, interval=timeframe, limit=220)
+                frames[timeframe] = completed_candles(df, timeframe)
+                if not frames[timeframe].empty:
+                    self.alert_engine.store.add_closed_candles(symbol, asset_class, source, timeframe, frames[timeframe])
 
             existing = self.latest(symbol)
             risk = existing["risk"] if existing else self.risk_engine.score(symbol, asset_class or "UNKNOWN", frames.get("15m"), False, False)

@@ -13,9 +13,7 @@ generator:
      composite risk score) override signal quality entirely. A good-looking
      setup inside a news embargo is still a WAIT.
 
-This produces a probability-weighted technical read, not a certainty. It is
-explicitly not a promise of profit — see the `disclaimer` field every report
-carries, which callers should always surface next to the numbers.
+The composite is an uncalibrated confluence score, never a win probability.
 """
 from __future__ import annotations
 
@@ -165,20 +163,34 @@ class TradeAnalyst:
             raw_recommendation = "WAIT"
             probability_percent = max(composite_bullish_percent, composite_bearish_percent)
 
-        # Risk-first override: a trader stands aside in a news embargo or HIGH
-        # composite risk regardless of how good the signal looks.
+        # A directional technical lean alone is not an executable setup.
         override_reason = None
+        override_code = None
         recommendation = raw_recommendation
-        if news_guard.get("active"):
+        if primary.empty or any(frames.get(tf) is None or len(frames[tf]) < 210 for tf in TREND_TIMEFRAMES):
             recommendation = "WAIT"
+            override_code = "INCOMPLETE_DATA"
+            override_reason = "Complete 15m, 1h and 4h candle history is required before a trade call."
+        elif news_guard.get("active"):
+            recommendation = "WAIT"
+            override_code = "NEWS_EMBARGO"
             override_reason = "High-impact economic news embargo is active — standing aside overrides the signal."
+        elif not news_guard.get("configured") or news_guard.get("provider_error") or news_guard.get("safe") is not True:
+            recommendation = "WAIT"
+            override_code = "NEWS_UNKNOWN"
+            override_reason = "Economic news status is unavailable; a clear calendar is required before a trade call."
         elif risk.get("risk_label") == "HIGH":
             recommendation = "WAIT"
+            override_code = "HIGH_RISK"
             override_reason = "Composite market risk is HIGH — signal quality does not override risk conditions."
+        elif structure["setup"].get("status") != "A_PLUS_SETUP" or structure["setup"].get("action") != recommendation:
+            recommendation = "WAIT"
+            override_code = "NO_ENTRY_TRIGGER"
+            override_reason = "No confirmed structural entry trigger aligned with the directional read."
 
-        entry_plan = self._entry_plan(primary, recommendation if recommendation != "WAIT" else raw_recommendation, structure["setup"], risk)
+        entry_plan = self._entry_plan(primary, recommendation, structure["setup"], risk)
 
-        suggested_risk_percent = self._suggested_risk(probability_percent, risk, recommendation)
+        suggested_risk_percent = self._suggested_risk(risk, recommendation)
 
         reasons = [methods["structure"]["detail"], methods["trend"]["detail"], methods["momentum"]["detail"], methods["volume"]["detail"]]
         if methods["momentum"].get("caution"):
@@ -202,9 +214,12 @@ class TradeAnalyst:
             "recommendation": recommendation,
             "raw_recommendation": raw_recommendation,
             "probability_percent": probability_percent,
+            "score_type": "UNCALIBRATED_CONFLUENCE",
+            "calibrated_probability_percent": None,
             "composite_bullish_percent": composite_bullish_percent,
             "composite_bearish_percent": composite_bearish_percent,
             "override_reason": override_reason,
+            "override_code": override_code,
             "entry_plan": entry_plan,
             "suggested_risk_percent": suggested_risk_percent,
             "risk_label": risk.get("risk_label"),
@@ -212,13 +227,13 @@ class TradeAnalyst:
             "method_breakdown": breakdown,
             "reasons": [r for r in reasons if r],
             "disclaimer": (
-                "This is a probability-weighted technical read across structure, trend, momentum and volume — "
-                "not a certainty and not investment advice. No combination of indicators guarantees a profitable trade."
+                "This is an uncalibrated technical confluence score, not a win probability or investment advice. "
+                "No combination of indicators guarantees a profitable trade."
             ),
         }
 
     def _entry_plan(self, df: pd.DataFrame, direction: str, setup: dict[str, Any], risk: dict[str, Any]) -> Optional[dict[str, Any]]:
-        if direction not in {"BUY", "SELL"} or df.empty:
+        if direction not in {"BUY", "SELL"} or df.empty or setup.get("status") != "A_PLUS_SETUP" or setup.get("action") != direction:
             return None
 
         if setup.get("status") == "A_PLUS_SETUP" and setup.get("action") == direction:
@@ -231,38 +246,15 @@ class TradeAnalyst:
                 "note": "A precise structural entry trigger (FVG midpoint) is already active for this direction.",
             }
 
-        close = float(df["close"].iloc[-1])
-        atr_value = float(ind.atr(df).iloc[-1])
-        if not atr_value or atr_value <= 0:
-            return None
-        if direction == "BUY":
-            sl = close - 1.5 * atr_value
-            tp = close + 3.0 * atr_value
-        else:
-            sl = close + 1.5 * atr_value
-            tp = close - 3.0 * atr_value
-        return {
-            "basis": "ATR_GENERIC",
-            "entry": round(close, 8),
-            "sl": round(sl, 8),
-            "tp": round(tp, 8),
-            "rr": "1:2.0",
-            "note": "No precise structural trigger yet — this is a generic ATR-based risk frame, not a live setup. Consider waiting for a pullback or a structural confirmation instead of chasing the market.",
-        }
+        return None
 
-    def _suggested_risk(self, probability_percent: float, risk: dict[str, Any], recommendation: str) -> float:
+    def _suggested_risk(self, risk: dict[str, Any], recommendation: str) -> float:
         if recommendation not in {"BUY", "SELL"}:
             return 0.0
-        if probability_percent >= 80:
-            base = 1.5
-        elif probability_percent >= ACTIONABLE_THRESHOLD:
-            base = 1.0
-        else:
-            base = 0.5
-
+        # An uncalibrated score cannot justify increasing position size.
+        base = 0.5
         if risk.get("risk_label") == "ELEVATED":
-            base *= 0.6
+            base *= 0.5
         elif risk.get("risk_label") == "MODERATE":
-            base *= 0.85
-
-        return round(min(2.0, max(0.25, base)), 2)
+            base *= 0.8
+        return round(base, 2)

@@ -12,6 +12,7 @@ from config import load_settings
 from engine.confluence_engine import ConfluenceEngine
 from engine.risk_engine import RiskEngine
 from engine.trade_analyst import TradeAnalyst
+from engine.outcomes import audit_call
 from news_calendar import EconomicCalendarService
 from providers.market_data import MarketDataHub, classify_symbol
 from scheduler import MarketMonitor
@@ -81,6 +82,7 @@ async def health_check():
         "data_status": market_data.data_status(),
         "news_guard": calendar_service.status(),
         "telegram_configured": notifier.configured,
+        "research_storage": store.research_readiness()["storage"],
         "disclaimer": _disclaimer(),
     }
 
@@ -160,6 +162,31 @@ async def analysis_detail(symbol: str):
 @app.get("/api/trade-calls")
 async def trade_calls(limit: int = 50, symbol: str | None = None):
     return {"items": store.recent_trade_calls(limit=limit, symbol=symbol)}
+
+
+@app.get("/api/data/history/{symbol}")
+async def historical_candles(symbol: str, timeframe: str = "15m", limit: int = 500):
+    if symbol.upper() not in market_data.watchlist or timeframe not in {"15m", "1h", "4h"}:
+        raise HTTPException(status_code=404, detail="Historical series is unavailable for this symbol or timeframe.")
+    items = store.historical_candles(symbol, timeframe=timeframe, limit=limit)
+    return {"symbol": symbol.upper(), "timeframe": timeframe, "items": items, "count": len(items)}
+
+
+@app.get("/api/research/readiness")
+async def research_readiness():
+    return store.research_readiness()
+
+
+@app.get("/api/research/outcomes")
+async def research_outcomes(limit: int = 100):
+    calls = store.recent_trade_calls(limit=max(1, min(limit, 500)))
+    items = [audit_call(call, store.candles_after(call["symbol"], call["created_at"], 120)) for call in calls]
+    return {
+        "items": items,
+        "counts": {status: sum(item["status"] == status for item in items) for status in
+                   ("WIN", "LOSS", "UNFILLED", "AMBIGUOUS", "EXPIRED", "PENDING", "DATA_GAP", "NO_PLAN", "INVALID_PLAN")},
+        "note": "Gross bar-based observations only. Intrabar ambiguity, fills, spreads, fees and slippage prevent these from being tradable performance or calibrated probabilities.",
+    }
 
 
 @app.get("/api/alerts")

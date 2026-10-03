@@ -133,6 +133,7 @@ export type TradeAnalysis = {
   composite_bullish_percent: number;
   composite_bearish_percent: number;
   override_reason: string | null;
+  override_code?: 'INCOMPLETE_DATA' | 'NEWS_EMBARGO' | 'NEWS_UNKNOWN' | 'HIGH_RISK' | 'NO_ENTRY_TRIGGER' | null;
   entry_plan: EntryPlan;
   suggested_risk_percent: number;
   risk_label: RiskLabel;
@@ -171,5 +172,6 @@ export type HealthPayload = {
   };
   news_guard: { configured: boolean; active: boolean; safe?: boolean; provider_error?: string | null; message?: string };
   telegram_configured: boolean;
+  research_storage?: 'PERSISTENT_VOLUME' | 'EPHEMERAL_CONTAINER' | 'LOCAL_DISK';
   disclaimer: string;
 };

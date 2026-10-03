@@ -1,10 +1,13 @@
 import json
+import os
 import sqlite3
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+import pandas as pd
 
 
 def utc_now_iso() -> str:
@@ -84,14 +87,94 @@ class VertexStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS market_candles (
+                    symbol TEXT NOT NULL,
+                    asset_class TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    open_time TEXT NOT NULL,
+                    open REAL NOT NULL,
+                    high REAL NOT NULL,
+                    low REAL NOT NULL,
+                    close REAL NOT NULL,
+                    volume REAL,
+                    PRIMARY KEY (symbol, timeframe, open_time)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_alerts_symbol ON alerts(symbol);
                 CREATE INDEX IF NOT EXISTS idx_signal_events_created_at ON signal_events(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_risk_snapshots_created_at ON risk_snapshots(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_risk_snapshots_symbol ON risk_snapshots(symbol);
                 CREATE INDEX IF NOT EXISTS idx_trade_calls_created_at ON trade_calls(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_market_candles_lookup ON market_candles(symbol, timeframe, open_time DESC);
                 """
             )
+
+    def add_closed_candles(self, symbol: str, asset_class: str, source: str, timeframe: str, candles: pd.DataFrame) -> int:
+        """Archive only completed provider bars; repeated scans never rewrite history."""
+        if candles.empty:
+            return 0
+        interval_seconds = {"15m": 900, "1h": 3600, "4h": 14400}.get(timeframe)
+        if interval_seconds is None:
+            raise ValueError("Unsupported candle timeframe")
+        now = datetime.now(timezone.utc)
+        rows = []
+        for candle in candles.itertuples(index=False):
+            opened = pd.Timestamp(candle.time)
+            if opened.tzinfo is None:
+                opened = opened.tz_localize("UTC")
+            if (now - opened.to_pydatetime()).total_seconds() < interval_seconds:
+                continue
+            values = (float(candle.open), float(candle.high), float(candle.low), float(candle.close))
+            if not all(pd.notna(value) for value in values) or values[1] < max(values[0], values[3]) or values[2] > min(values[0], values[3]):
+                continue
+            volume = float(candle.volume) if hasattr(candle, "volume") and pd.notna(candle.volume) else None
+            rows.append((symbol.upper(), asset_class, source, timeframe, opened.isoformat(), *values, volume))
+        with self._lock, self._conn:
+            cursor = self._conn.executemany(
+                """INSERT OR IGNORE INTO market_candles
+                   (symbol, asset_class, source, timeframe, open_time, open, high, low, close, volume)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows,
+            )
+        return cursor.rowcount
+
+    def historical_candles(self, symbol: str, timeframe: str = "15m", limit: int = 500) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 2000))
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT symbol, asset_class, source, timeframe, open_time, open, high, low, close, volume
+                   FROM market_candles WHERE symbol = ? AND timeframe = ? ORDER BY open_time DESC LIMIT ?""",
+                (symbol.upper(), timeframe, limit),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def candles_after(self, symbol: str, open_time: str, limit: int = 120) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT open_time, open, high, low, close FROM market_candles
+                   WHERE symbol = ? AND timeframe = '15m' AND open_time >= ?
+                   ORDER BY open_time ASC LIMIT ?""",
+                (symbol.upper(), open_time, max(1, min(int(limit), 500))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def research_readiness(self) -> dict[str, Any]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT asset_class, timeframe, COUNT(*) AS bars, COUNT(DISTINCT symbol) AS symbols,
+                          MIN(open_time) AS first_open_time, MAX(open_time) AS last_open_time
+                   FROM market_candles GROUP BY asset_class, timeframe ORDER BY asset_class, timeframe"""
+            ).fetchall()
+        mount = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+        on_railway = bool(os.getenv("RAILWAY_ENVIRONMENT_ID"))
+        persistent = bool(mount and Path(self.path).resolve().is_relative_to(Path(mount).resolve())) if self.path != ":memory:" else False
+        return {
+            "storage": "PERSISTENT_VOLUME" if persistent else "EPHEMERAL_CONTAINER" if on_railway else "LOCAL_DISK",
+            "series": [dict(row) for row in rows],
+            "calibrated_probability_available": False,
+            "reason": "No independently validated, out-of-sample trade outcomes are available yet.",
+        }
 
     def add_alert(self, symbol: str, asset_class: str, category: str, severity: str, title: str, message: str, metadata: Optional[dict] = None) -> str:
         alert_id = f"ALT-{uuid.uuid4().hex[:12].upper()}"

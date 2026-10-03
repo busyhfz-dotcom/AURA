@@ -5,6 +5,7 @@ import pandas as pd
 
 from engine.confluence_engine import ConfluenceEngine
 from engine.trade_analyst import TradeAnalyst
+from engine.indicators import rsi
 
 
 def _trending_candles(n=260, base=100.0, drift=0.05, noise=0.15, seed=7):
@@ -86,6 +87,49 @@ class TradeAnalystTests(unittest.TestCase):
         result = self.analyst.analyze("NEWSYMBOL", frames, risk, NEWS_INACTIVE)
         self.assertEqual(result["recommendation"], "WAIT")
         self.assertIsNone(result["entry_plan"])
+
+    def test_news_provider_failure_blocks_calls_and_entry_plan(self):
+        frames = {tf: _trending_candles(seed=1) for tf in ("15m", "1h", "4h")}
+        risk = {"risk_label": "LOW", "risk_score": 10}
+        result = self.analyst.analyze("BTCUSDT", frames, risk, {"configured": True, "safe": False, "provider_error": "HTTP 403"})
+        self.assertEqual(result["recommendation"], "WAIT")
+        self.assertIsNone(result["entry_plan"])
+        self.assertIsNone(result["calibrated_probability_percent"])
+        self.assertEqual(result["score_type"], "UNCALIBRATED_CONFLUENCE")
+
+    def test_unconfigured_news_guard_is_unknown_and_blocks_calls(self):
+        frames = {tf: _trending_candles(seed=1) for tf in ("15m", "1h", "4h")}
+        result = self.analyst.analyze("BTCUSDT", frames, {"risk_label": "LOW", "risk_score": 10}, NEWS_INACTIVE)
+        self.assertEqual(result["override_code"], "NEWS_UNKNOWN")
+        self.assertEqual(result["recommendation"], "WAIT")
+
+    def test_directional_trend_without_structural_trigger_is_not_a_trade_call(self):
+        frames = {tf: _trending_candles(seed=1) for tf in ("15m", "1h", "4h")}
+        result = self.analyst.analyze("BTCUSDT", frames, {"risk_label": "LOW", "risk_score": 10}, NEWS_INACTIVE)
+        if result["recommendation"] in {"BUY", "SELL"}:
+            self.assertEqual(result["entry_plan"]["basis"], "STRUCTURAL_TRIGGER")
+        else:
+            self.assertIsNone(result["entry_plan"])
+
+    def test_confirmed_trigger_and_clear_news_can_produce_a_call(self):
+        class ConfirmedConfluence:
+            def find_setup(self, _df, symbol):
+                return {"symbol": symbol, "status": "A_PLUS_SETUP", "action": "BUY", "confluence_score": 90,
+                        "entry": 110.0, "sl": 108.0, "tp": 116.0, "rr": "1:3.0"}
+
+        frames = {tf: _trending_candles(seed=1) for tf in ("15m", "1h", "4h")}
+        result = TradeAnalyst(ConfirmedConfluence()).analyze(
+            "BTCUSDT", frames, {"risk_label": "LOW", "risk_score": 10},
+            {"configured": True, "safe": True, "active": False},
+        )
+        self.assertEqual(result["recommendation"], "BUY")
+        self.assertEqual(result["entry_plan"]["basis"], "STRUCTURAL_TRIGGER")
+        self.assertEqual(result["suggested_risk_percent"], 0.5)
+
+    def test_rsi_handles_zero_loss_and_zero_gain(self):
+        self.assertEqual(float(rsi(pd.Series(range(50))).iloc[-1]), 100.0)
+        self.assertEqual(float(rsi(pd.Series(range(50, 0, -1))).iloc[-1]), 0.0)
+        self.assertEqual(float(rsi(pd.Series([10.0] * 50)).iloc[-1]), 50.0)
 
 
 if __name__ == "__main__":

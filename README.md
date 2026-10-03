@@ -6,7 +6,7 @@ a composite risk score per symbol, an alert feed (with optional Telegram
 push), an economic-news guard, and a **Trade Desk** that runs a
 transparent, weighted multi-method read (market structure, multi-timeframe
 trend, momentum, volume) on every watchlist symbol and turns it into a
-confluence probability, a suggested risk size, and — when a precise
+uncalibrated confluence score, a conservative risk cap, and — only when a precise
 structural trigger exists — an entry/stop/target plan. All in an
 English-first, full-Persian-RTL interface.
 
@@ -21,9 +21,9 @@ This platform reads market structure and flags risk conditions. It does
 risk score, Trade Desk recommendation, or alert here is a guarantee of
 profit — treat it as one input into your own judgment, not a replacement
 for it. The Trade Desk is designed to act with a professional trader's
-discipline: it deliberately overrides its own BUY/SELL read and forces
-WAIT whenever a high-impact news embargo is active or the composite risk
-score is HIGH, because risk management comes before signal quality — and
+discipline: it forces WAIT when a high-impact news embargo is active, news
+status is unavailable, market data is incomplete, composite risk is HIGH,
+or a confirmed structural entry trigger is absent — and
 every analysis carries this same disclaimer.
 
 ## Architecture
@@ -35,6 +35,8 @@ backend/   FastAPI. Binance public API for crypto (live, no key needed).
            Background asyncio loop scans the whole watchlist every N
            seconds regardless of whether a dashboard is open, persists
            alerts/signals/risk history to SQLite, and can push to Telegram.
+           Archives completed provider candles and audits subsequent call
+           outcomes conservatively; these are not broker execution results.
 frontend/  Next.js + Tailwind. English default, full Persian RTL locale.
            Live watchlist, risk heatmap, alert feed, signal log, economic
            calendar, per-symbol candlestick chart with entry/SL/TP lines.
@@ -64,6 +66,14 @@ Two supported paths:
   (backend) + Vercel (frontend). No server to manage, both give you HTTPS
   and a public domain automatically, and both run outside Iran so
   Binance/Twelve Data/Finnhub stay reachable.
+
+For durable research history on Railway, attach a volume to the backend at
+`/data` (the location of `VERTEX_DATABASE_PATH`). Without it, the database
+resets on redeployment. Archive coverage and storage status are visible at
+`/api/research/readiness`; forward call audits are at `/api/research/outcomes`.
+The [research register](./docs/research-evidence.md) records data provenance,
+video-screening rules, and the validation requirements before a strategy is
+allowed into live scoring.
 
 ## Backend tests
 

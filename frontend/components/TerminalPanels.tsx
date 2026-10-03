@@ -3,7 +3,7 @@ import { Activity, ArrowUpRight, CheckCircle2, Clock3, ShieldAlert, ShieldCheck,
 import type { Dictionary } from '../locales/dictionary';
 import type { HealthPayload, MarketRecord, TradeAnalysis } from './types';
 import { formatPrice } from './panels';
-import { recLabel } from './TradeDesk';
+import { overrideLabel, recLabel } from './TradeDesk';
 
 function StatePill({ state, label }: { state: 'ok' | 'warn' | 'bad'; label: string }) {
   return <span className={'vx-state vx-state-' + state}><span className="vx-state-dot" />{label}</span>;
@@ -11,6 +11,7 @@ function StatePill({ state, label }: { state: 'ok' | 'warn' | 'bad'; label: stri
 
 function riskOverride(analysis: TradeAnalysis, record: MarketRecord | null, t: Dictionary): string | null {
   if (!analysis.override_reason) return null;
+  if (analysis.override_code) return overrideLabel(analysis, t);
   if (record?.risk?.news_embargo_active || record?.news_guard?.active) return t.riskOverrideNews;
   if (analysis.risk_label === 'HIGH' || record?.risk?.risk_label === 'HIGH') return t.riskOverrideHigh;
   return t.riskOverrideOther;
@@ -93,6 +94,10 @@ export function SourceHealth({
       <div className="vx-source-row">
         <div><strong>{t.forex} / {t.metals}</strong><span>Twelve Data</span></div>
         <StatePill state={forexOk ? 'ok' : unknown || forexUnconfigured ? 'warn' : 'bad'} label={forexOk ? t.dataHealthy : unknown ? t.unknownStatus : forexUnconfigured ? t.providerSetup : t.dataUnavailable} />
+      </div>
+      <div className="vx-source-row">
+        <div><strong>{t.researchArchive}</strong><span>SQLite</span></div>
+        <StatePill state={health?.research_storage === 'PERSISTENT_VOLUME' ? 'ok' : 'warn'} label={!health ? t.archiveUnknown : health.research_storage === 'PERSISTENT_VOLUME' || health.research_storage === 'LOCAL_DISK' ? t.archiveDurable : t.archiveEphemeral} />
       </div>
       <div className="vx-scan-counts">
         <div><span>{t.scanCrypto}</span><strong className="vx-mono">{health?.scan_counts_by_class?.crypto ?? '—'}</strong></div>
