@@ -16,6 +16,8 @@ EXIT_BARS = 96
 
 def audit_call(call: dict[str, Any], bars: list[dict[str, Any]]) -> dict[str, Any]:
     base = {"id": call["id"], "symbol": call["symbol"], "asset_class": call["asset_class"], "gross_r": None}
+    if call.get("methodology_version", 1) < 2:
+        return {**base, "status": "LEGACY_METHOD"}
     direction = call["recommendation"]
     entry, stop, target = call.get("entry"), call.get("sl"), call.get("tp")
     if direction not in {"BUY", "SELL"} or any(v is None for v in (entry, stop, target)):

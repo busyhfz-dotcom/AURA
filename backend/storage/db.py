@@ -84,6 +84,7 @@ class VertexStore:
                     sl REAL,
                     tp REAL,
                     basis TEXT,
+                    methodology_version INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL
                 );
 
@@ -110,6 +111,9 @@ class VertexStore:
                 CREATE INDEX IF NOT EXISTS idx_market_candles_lookup ON market_candles(symbol, timeframe, open_time DESC);
                 """
             )
+            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(trade_calls)")}
+            if "methodology_version" not in columns:
+                self._conn.execute("ALTER TABLE trade_calls ADD COLUMN methodology_version INTEGER NOT NULL DEFAULT 1")
 
     def add_closed_candles(self, symbol: str, asset_class: str, source: str, timeframe: str, candles: pd.DataFrame) -> int:
         """Archive only completed provider bars; repeated scans never rewrite history."""
@@ -215,13 +219,13 @@ class VertexStore:
         entry_plan = analysis.get("entry_plan") or {}
         with self._lock, self._conn:
             self._conn.execute(
-                """INSERT INTO trade_calls (id, symbol, asset_class, recommendation, probability_percent, suggested_risk_percent, entry, sl, tp, basis, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO trade_calls (id, symbol, asset_class, recommendation, probability_percent, suggested_risk_percent, entry, sl, tp, basis, methodology_version, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     call_id, analysis["symbol"], asset_class, analysis["recommendation"],
                     float(analysis["probability_percent"]), float(analysis["suggested_risk_percent"]),
                     entry_plan.get("entry"), entry_plan.get("sl"), entry_plan.get("tp"),
-                    entry_plan.get("basis"), utc_now_iso(),
+                    entry_plan.get("basis"), 2, utc_now_iso(),
                 ),
             )
         return call_id

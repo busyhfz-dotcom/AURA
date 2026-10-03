@@ -10,6 +10,7 @@ class OutcomeAuditTests(unittest.TestCase):
         self.call = {
             "id": "CALL-1", "symbol": "BTCUSDT", "asset_class": "CRYPTO",
             "recommendation": "BUY", "entry": 100.0, "sl": 98.0, "tp": 106.0,
+            "methodology_version": 2,
             "created_at": self.called.isoformat(),
         }
 
@@ -33,6 +34,10 @@ class OutcomeAuditTests(unittest.TestCase):
     def test_loss_after_fill(self):
         bars = [self.bar(0, 99.5, 101.0), self.bar(1, 97.5, 101.0)]
         self.assertEqual(audit_call(self.call, bars)["status"], "LOSS")
+
+    def test_prior_method_is_excluded_from_current_outcomes(self):
+        self.call["methodology_version"] = 1
+        self.assertEqual(audit_call(self.call, [self.bar(0, 99.5, 101.0)])['status'], 'LEGACY_METHOD')
 
 
 if __name__ == "__main__":

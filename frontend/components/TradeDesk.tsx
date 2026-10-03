@@ -174,6 +174,9 @@ export function TradeCallHistory({ calls, t }: { calls: TradeCall[]; t: Dictiona
   return (
     <div className="vx-panel rounded-lg p-3">
       <h3 className="mb-2 text-[12px] font-semibold text-white">{t.tradeCallHistory}</h3>
+      {calls.some((call) => (call.methodology_version || 1) < 2) && (
+        <p className="mb-2 text-[11px] leading-4 text-[#f8bc63]">{t.legacyCall}</p>
+      )}
       <div className="vx-thin-scroll max-h-[220px] overflow-y-auto">
         <table className="w-full border-collapse text-left text-[11px] rtl:text-right">
           <thead>
@@ -190,16 +193,19 @@ export function TradeCallHistory({ calls, t }: { calls: TradeCall[]; t: Dictiona
             {calls.length === 0 && (
               <tr><td colSpan={6} className="py-6 text-center text-[12px] text-[#5f7589]">{t.noTradeCalls}</td></tr>
             )}
-            {calls.map((call) => (
+            {calls.map((call) => {
+              const legacy = (call.methodology_version || 1) < 2;
+              return (
               <tr key={call.id} className="border-b border-[#0f2233]">
                 <td className="vx-mono py-1.5 pr-2 text-white">{call.symbol}</td>
-                <td className={`py-1.5 pr-2 font-semibold ${call.recommendation === 'SELL' ? 'text-[#ff5a72]' : 'text-[#2ae9bd]'}`}>{call.recommendation}</td>
-                <td className="vx-mono py-1.5 pr-2 text-[#c3d2df]">{call.probability_percent}%</td>
-                <td className="vx-mono py-1.5 pr-2 text-[#c3d2df]">{call.suggested_risk_percent}%</td>
-                <td className="vx-mono py-1.5 pr-2 text-[#c3d2df]">{formatPrice(call.entry, call.symbol)}</td>
+                <td className={`py-1.5 pr-2 font-semibold ${legacy ? 'text-[#f8bc63]' : call.recommendation === 'SELL' ? 'text-[#ff5a72]' : 'text-[#2ae9bd]'}`}>{legacy ? t.historicalCall : call.recommendation}</td>
+                <td className="vx-mono py-1.5 pr-2 text-[#c3d2df]">{legacy ? '—' : `${call.probability_percent}%`}</td>
+                <td className="vx-mono py-1.5 pr-2 text-[#c3d2df]">{legacy ? '—' : `${call.suggested_risk_percent}%`}</td>
+                <td className="vx-mono py-1.5 pr-2 text-[#c3d2df]">{legacy ? '—' : formatPrice(call.entry, call.symbol)}</td>
                 <td className="vx-mono py-1.5 pr-2 text-[#5f7589]">{new Date(call.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

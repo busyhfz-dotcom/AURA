@@ -150,18 +150,21 @@ export function AlertsFeed({ alerts, t }: { alerts: AlertItem[]; t: Dictionary }
       <h3 className="mb-2 text-[12px] font-semibold text-white">{t.recentAlerts}</h3>
       <div className="vx-thin-scroll max-h-[340px] space-y-2 overflow-y-auto">
         {alerts.length === 0 && <div className="py-6 text-center text-[12px] text-[#5f7589]">{t.noAlerts}</div>}
-        {alerts.map((alert) => (
+        {alerts.map((alert) => {
+          const legacyCall = alert.category === 'TRADE_CALL' && alert.metadata?.score_type !== 'UNCALIBRATED_CONFLUENCE';
+          return (
           <div key={alert.id} className="flex items-start gap-2 rounded-md border border-[#15293c] bg-[#081522] p-2">
             <div className="mt-0.5">{sevIcon(alert.severity)}</div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-[12px] font-semibold text-white">{alert.title}</span>
+                <span className="truncate text-[12px] font-semibold text-white">{legacyCall ? `${alert.symbol}: ${t.historicalCall}` : alert.title}</span>
                 <span className="vx-mono shrink-0 text-[12px] text-[#5f7589]">{new Date(alert.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
-              <p className="mt-0.5 text-[11px] leading-4 text-[#9aabba]">{alert.message}</p>
+              <p className="mt-0.5 text-[11px] leading-4 text-[#9aabba]">{legacyCall ? t.legacyCall : alert.message}</p>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

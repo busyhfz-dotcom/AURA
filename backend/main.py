@@ -184,7 +184,7 @@ async def research_outcomes(limit: int = 100):
     return {
         "items": items,
         "counts": {status: sum(item["status"] == status for item in items) for status in
-                   ("WIN", "LOSS", "UNFILLED", "AMBIGUOUS", "EXPIRED", "PENDING", "DATA_GAP", "NO_PLAN", "INVALID_PLAN")},
+                   ("WIN", "LOSS", "UNFILLED", "AMBIGUOUS", "EXPIRED", "PENDING", "DATA_GAP", "NO_PLAN", "INVALID_PLAN", "LEGACY_METHOD")},
         "note": "Gross bar-based observations only. Intrabar ambiguity, fills, spreads, fees and slippage prevent these from being tradable performance or calibrated probabilities.",
     }
 

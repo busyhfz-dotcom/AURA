@@ -69,6 +69,7 @@ export type AlertItem = {
   severity: 'HIGH' | 'MEDIUM' | 'INFO' | string;
   title: string;
   message: string;
+  metadata?: { score_type?: string; [key: string]: unknown };
   created_at: string;
 };
 
@@ -155,6 +156,7 @@ export type TradeCall = {
   sl: number | null;
   tp: number | null;
   basis: string | null;
+  methodology_version?: number;
   created_at: string;
 };
 

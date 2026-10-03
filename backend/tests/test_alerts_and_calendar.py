@@ -3,6 +3,7 @@ import tempfile
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 
 from alerts.alert_engine import AlertEngine
 from alerts.telegram_notifier import TelegramNotifier
@@ -41,12 +42,16 @@ class NewsCalendarTests(unittest.TestCase):
 
 
 class AlertEngineTests(unittest.TestCase):
+    @contextmanager
     def _store(self, tmp):
-        return VertexStore(os.path.join(tmp, "vertex.db"))
+        store = VertexStore(os.path.join(tmp, "vertex.db"))
+        try:
+            yield store
+        finally:
+            store._conn.close()
 
     def test_high_risk_fires_alert_and_is_persisted(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            store = self._store(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self._store(tmp) as store:
             engine = AlertEngine(store, TelegramNotifier(None, None), cooldown_seconds=900)
             risk = {"risk_score": 85, "risk_label": "HIGH", "reasons": ["Elevated volatility."], "news_embargo_active": False}
             signal = {"status": "SCANNING", "confluence_score": 20}
@@ -56,8 +61,7 @@ class AlertEngineTests(unittest.TestCase):
             self.assertEqual(len(store.recent_alerts()), 1)
 
     def test_cooldown_prevents_duplicate_alert_spam(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            store = self._store(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self._store(tmp) as store:
             engine = AlertEngine(store, TelegramNotifier(None, None), cooldown_seconds=900)
             risk = {"risk_score": 90, "risk_label": "HIGH", "reasons": [], "news_embargo_active": False}
             signal = {"status": "SCANNING", "confluence_score": 0}
@@ -67,8 +71,7 @@ class AlertEngineTests(unittest.TestCase):
             self.assertEqual(len(second), 0)
 
     def test_new_setup_is_logged_as_signal_event_and_alert(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            store = self._store(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self._store(tmp) as store:
             engine = AlertEngine(store, TelegramNotifier(None, None))
             risk = {"risk_score": 10, "risk_label": "LOW", "reasons": [], "news_embargo_active": False}
             signal = {
