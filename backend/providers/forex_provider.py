@@ -66,7 +66,7 @@ def _to_provider_symbol(symbol: str) -> str:
 def _redact(text: Optional[str]) -> Optional[str]:
     """Strip the API key from provider error text (requests embeds the full
     URL, including ?apikey=..., in its exception messages) so it never reaches
-    the public /api/health response."""
+    public responses or application logs."""
     if text is None:
         return None
     return re.sub(r"(apikey=)[^&\s'\"]+", r"\1***", text, flags=re.IGNORECASE)
@@ -132,6 +132,10 @@ class ForexProvider:
     @property
     def last_error(self) -> Optional[str]:
         return _redact(self._last_error)
+
+    def _safe_error(self, exc: Exception) -> str:
+        message = _redact(str(exc)) or type(exc).__name__
+        return message.replace(self.api_key, "***") if self.api_key else message
 
     def status(self) -> dict[str, Any]:
         if not self.configured:
@@ -232,8 +236,8 @@ class ForexProvider:
             self._last_error = None
             return df.copy()
         except Exception as exc:
-            self._last_error = str(exc)
-            logger.warning("Twelve Data candles fetch failed for %s: %s", symbol, exc)
+            self._last_error = self._safe_error(exc)
+            logger.warning("Twelve Data candles fetch failed for %s: %s", symbol, self._last_error)
             with self._lock:
                 cached = self._kline_cache.get(cache_key)
             if cached:
@@ -304,8 +308,8 @@ class ForexProvider:
             self._last_error = None
             return result
         except Exception as exc:
-            self._last_error = str(exc)
-            logger.warning("Twelve Data quote fetch failed for %s: %s", symbol, exc)
+            self._last_error = self._safe_error(exc)
+            logger.warning("Twelve Data quote fetch failed for %s: %s", symbol, self._last_error)
             with self._lock:
                 cached = self._quote_cache.get(provider_symbol)
             return cached[1] if cached else None
