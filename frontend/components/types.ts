@@ -57,7 +57,7 @@ export type MarketRecord = {
   snapshot: Snapshot;
   signal: Signal;
   risk: Risk;
-  news_guard: { configured: boolean; active: boolean; safe?: boolean; message?: string };
+  news_guard: { configured: boolean; active: boolean; safe?: boolean; provider_error?: string | null; message?: string };
   updated_at: number;
 };
 
@@ -163,12 +163,13 @@ export type HealthPayload = {
   version: string;
   uptime_seconds: number;
   scan_count: number;
+  scan_counts_by_class?: { crypto: number; forex: number };
   scan_interval_seconds: number;
   data_status: {
     crypto: { provider: string; healthy: boolean; last_error: string | null };
     forex: { configured: boolean; provider: string | null; message?: string; healthy?: boolean; last_error?: string | null };
   };
-  news_guard: { configured: boolean; active: boolean; message?: string };
+  news_guard: { configured: boolean; active: boolean; safe?: boolean; provider_error?: string | null; message?: string };
   telegram_configured: boolean;
   disclaimer: string;
 };

@@ -35,7 +35,7 @@ export function StatsStrip({ stats, t }: { stats: Stats24h | null; t: Dictionary
     <div className="grid grid-cols-3 gap-2">
       {items.map((item) => (
         <div key={item.label} className="vx-panel rounded-lg p-3">
-          <div className="text-[9px] text-[#7f93a6]">{item.label}</div>
+          <div className="text-[11px] text-[#7f93a6]">{item.label}</div>
           <div className="vx-mono mt-1 text-[18px] font-semibold text-white">{item.value}</div>
         </div>
       ))}
@@ -50,11 +50,10 @@ export function WatchlistGrid({
     <div className="vx-panel rounded-lg p-3">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-[12px] font-semibold text-white">{t.watchlist}</h3>
-        <span className="flex items-center gap-1.5 text-[9px] text-[#2ae9bd]">
-          <span className="vx-live-dot h-1.5 w-1.5 rounded-full bg-current" />{t.monitoring247}
-        </span>
+        <span className="text-[11px] text-[#8ca1b5]">{records.length} {t.markets}</span>
       </div>
       <div className="vx-thin-scroll grid max-h-[420px] grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
+        {records.length === 0 && <p className="py-8 text-center text-[12px] text-[#8ca1b5] sm:col-span-2">{t.waitingForData}</p>}
         {records.map((record) => {
           const risk = riskColor(record.risk?.risk_label || 'LOW');
           const positive = (record.snapshot?.price_change_percent ?? record.risk?.change_percent_24h ?? 0) >= 0;
@@ -71,17 +70,19 @@ export function WatchlistGrid({
                 {ready && <Sparkles className="h-3 w-3 text-[#2ae9bd]" />}
               </div>
               <div className="mt-1 flex items-center justify-between">
-                <span className="vx-mono text-[10px] text-[#c3d2df]">
+                <span className="vx-mono text-[12px] text-[#c3d2df]">
                   {record.data_available ? formatPrice(record.snapshot?.last_price, record.symbol) : t.waitingForData}
                 </span>
-                <span className={`vx-mono text-[9px] ${positive ? 'text-[#2ae9bd]' : 'text-[#ff5a72]'}`}>
+                <span className={`vx-mono text-[11px] ${positive ? 'text-[#2ae9bd]' : 'text-[#ff5a72]'}`}>
                   {record.data_available ? formatPct(record.snapshot?.price_change_percent ?? record.risk?.change_percent_24h) : '—'}
                 </span>
               </div>
               <div className="mt-1.5 flex items-center gap-1.5">
-                <span className={`rounded px-1.5 py-0.5 text-[7px] font-semibold ${risk.bg} ${risk.text} border ${risk.border}`}>
-                  {(t as any)[record.risk?.risk_label?.toLowerCase()] || record.risk?.risk_label} · {record.risk?.risk_score ?? 0}
-                </span>
+                {record.data_available ? (
+                  <span className={`rounded px-1.5 py-0.5 text-[12px] font-semibold ${risk.bg} ${risk.text} border ${risk.border}`}>
+                    {(t as any)[record.risk?.risk_label?.toLowerCase()] || record.risk?.risk_label} · {record.risk?.risk_score ?? 0}
+                  </span>
+                ) : <span className="rounded border border-[#59412a] bg-[#302318] px-1.5 py-0.5 text-[12px] text-[#f8bc63]">{t.dataUnavailable}</span>}
                 {record.risk?.news_embargo_active && <ShieldAlert className="h-3 w-3 text-[#ffb24a]" />}
               </div>
             </button>
@@ -98,7 +99,7 @@ export function RiskHeatmap({ records, t }: { records: MarketRecord[]; t: Dictio
     <div className="vx-panel rounded-lg p-3">
       <h3 className="mb-2 text-[12px] font-semibold text-white">{t.riskHeatmap}</h3>
       <div className="vx-thin-scroll max-h-[300px] overflow-y-auto">
-        <table className="w-full border-collapse text-left text-[9px] rtl:text-right">
+        <table className="w-full border-collapse text-left text-[11px] rtl:text-right">
           <thead>
             <tr className="border-b border-[#132b40] text-[#72879b]">
               <th className="py-1.5 pr-2">{t.symbol}</th>
@@ -109,6 +110,9 @@ export function RiskHeatmap({ records, t }: { records: MarketRecord[]; t: Dictio
           </thead>
           <tbody>
             {sorted.map((record) => {
+              if (!record.data_available) {
+                return <tr key={record.symbol} className="border-b border-[#0f2233]"><td className="vx-mono py-2 pr-2 text-white">{record.symbol}</td><td colSpan={3} className="py-2 text-[#f8bc63]">{t.dataUnavailable}</td></tr>;
+              }
               const risk = riskColor(record.risk?.risk_label || 'LOW');
               return (
                 <tr key={record.symbol} className="border-b border-[#0f2233]">
@@ -145,16 +149,16 @@ export function AlertsFeed({ alerts, t }: { alerts: AlertItem[]; t: Dictionary }
     <div className="vx-panel rounded-lg p-3">
       <h3 className="mb-2 text-[12px] font-semibold text-white">{t.recentAlerts}</h3>
       <div className="vx-thin-scroll max-h-[340px] space-y-2 overflow-y-auto">
-        {alerts.length === 0 && <div className="py-6 text-center text-[10px] text-[#5f7589]">{t.noAlerts}</div>}
+        {alerts.length === 0 && <div className="py-6 text-center text-[12px] text-[#5f7589]">{t.noAlerts}</div>}
         {alerts.map((alert) => (
           <div key={alert.id} className="flex items-start gap-2 rounded-md border border-[#15293c] bg-[#081522] p-2">
             <div className="mt-0.5">{sevIcon(alert.severity)}</div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-[10px] font-semibold text-white">{alert.title}</span>
-                <span className="vx-mono shrink-0 text-[8px] text-[#5f7589]">{new Date(alert.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="truncate text-[12px] font-semibold text-white">{alert.title}</span>
+                <span className="vx-mono shrink-0 text-[12px] text-[#5f7589]">{new Date(alert.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
-              <p className="mt-0.5 text-[9px] leading-4 text-[#9aabba]">{alert.message}</p>
+              <p className="mt-0.5 text-[11px] leading-4 text-[#9aabba]">{alert.message}</p>
             </div>
           </div>
         ))}
@@ -168,7 +172,7 @@ export function SignalLog({ events, t }: { events: SignalEvent[]; t: Dictionary 
     <div className="vx-panel rounded-lg p-3">
       <h3 className="mb-2 text-[12px] font-semibold text-white">{t.signals}</h3>
       <div className="vx-thin-scroll max-h-[260px] overflow-y-auto">
-        <table className="w-full border-collapse text-left text-[9px] rtl:text-right">
+        <table className="w-full border-collapse text-left text-[11px] rtl:text-right">
           <thead>
             <tr className="border-b border-[#132b40] text-[#72879b]">
               <th className="py-1.5 pr-2">{t.symbol}</th>
@@ -180,7 +184,7 @@ export function SignalLog({ events, t }: { events: SignalEvent[]; t: Dictionary 
           </thead>
           <tbody>
             {events.length === 0 && (
-              <tr><td colSpan={5} className="py-6 text-center text-[10px] text-[#5f7589]">{t.noSignals}</td></tr>
+              <tr><td colSpan={5} className="py-6 text-center text-[12px] text-[#5f7589]">{t.noSignals}</td></tr>
             )}
             {events.map((event) => (
               <tr key={event.id} className="border-b border-[#0f2233]">
@@ -198,22 +202,24 @@ export function SignalLog({ events, t }: { events: SignalEvent[]; t: Dictionary 
   );
 }
 
-export function CalendarPanel({ configured, events, t }: { configured: boolean; events: CalendarEvent[]; t: Dictionary }) {
+export function CalendarPanel({ configured, unavailable = false, events, t }: { configured: boolean; unavailable?: boolean; events: CalendarEvent[]; t: Dictionary }) {
   return (
     <div className="vx-panel rounded-lg p-3">
       <h3 className="mb-2 text-[12px] font-semibold text-white">{t.calendar}</h3>
-      {!configured ? (
-        <p className="py-4 text-center text-[9px] leading-4 text-[#8598aa]">{t.newsNotConfigured}</p>
+      {unavailable ? (
+        <p className="py-4 text-center text-[11px] leading-5 text-[#f8bc63]">{t.newsUnknown}</p>
+      ) : !configured ? (
+        <p className="py-4 text-center text-[11px] leading-4 text-[#8598aa]">{t.newsNotConfigured}</p>
       ) : (
         <div className="vx-thin-scroll max-h-[220px] space-y-1.5 overflow-y-auto">
-          {events.length === 0 && <div className="py-4 text-center text-[9px] text-[#5f7589]">—</div>}
+          {events.length === 0 && <div className="py-4 text-center text-[11px] text-[#5f7589]">—</div>}
           {events.map((event, i) => (
-            <div key={`${event.event}-${i}`} className="flex items-center justify-between rounded-md border border-[#15293c] bg-[#081522] px-2 py-1.5 text-[9px]">
+            <div key={`${event.event}-${i}`} className="flex items-center justify-between rounded-md border border-[#15293c] bg-[#081522] px-2 py-1.5 text-[11px]">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[#d7e2ec]">{event.event}</div>
-                <div className="text-[8px] text-[#5f7589]">{event.currency || event.country || ''}</div>
+                <div className="text-[12px] text-[#5f7589]">{event.currency || event.country || ''}</div>
               </div>
-              <span className={`ml-2 shrink-0 rounded px-1.5 py-0.5 text-[7px] font-semibold rtl:ml-0 rtl:mr-2 ${event.impact === 'HIGH' ? 'bg-[#3a1420] text-[#ff5a72]' : 'bg-[#152a3d] text-[#7fa8c7]'}`}>{event.impact}</span>
+              <span className={`ml-2 shrink-0 rounded px-1.5 py-0.5 text-[12px] font-semibold rtl:ml-0 rtl:mr-2 ${event.impact === 'HIGH' ? 'bg-[#3a1420] text-[#ff5a72]' : 'bg-[#152a3d] text-[#7fa8c7]'}`}>{event.impact}</span>
             </div>
           ))}
         </div>

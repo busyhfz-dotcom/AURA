@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { Activity, BarChart3, Clock3, ShieldAlert, TrendingUp } from 'lucide-react';
 import { createChart, IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { Dictionary } from '../locales/dictionary';
 import type { MarketRecord } from './types';
@@ -9,125 +10,110 @@ type Candle = { time: number; open: number; high: number; low: number; close: nu
 export default function SymbolDetail({
   record, candles, t,
 }: { record: MarketRecord | null; candles: Candle[]; t: Dictionary }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const priceLinesRef = useRef<any[]>([]);
 
   useEffect(() => {
-    if (!ref.current) return;
-    const chart = createChart(ref.current, {
-      width: ref.current.clientWidth,
-      height: ref.current.clientHeight,
-      layout: { background: { color: 'transparent' }, textColor: '#70859b', fontSize: 10 },
-      grid: { vertLines: { color: 'rgba(68,108,143,.1)' }, horzLines: { color: 'rgba(68,108,143,.1)' } },
-      rightPriceScale: { borderColor: 'rgba(73,113,148,.19)' },
-      timeScale: { borderColor: 'rgba(73,113,148,.19)', timeVisible: true, secondsVisible: false },
+    if (!canvasRef.current) return;
+    const chart = createChart(canvasRef.current, {
+      width: canvasRef.current.clientWidth,
+      height: canvasRef.current.clientHeight,
+      layout: { background: { color: '#06111e' }, textColor: '#7e93a9', fontSize: 11 },
+      grid: { vertLines: { color: 'rgba(69, 103, 138, .12)' }, horzLines: { color: 'rgba(69, 103, 138, .12)' } },
+      rightPriceScale: { borderColor: 'rgba(73, 113, 148, .2)' },
+      timeScale: { borderColor: 'rgba(73, 113, 148, .2)', timeVisible: true, secondsVisible: false },
+      crosshair: { vertLine: { color: '#3b648c' }, horzLine: { color: '#3b648c' } },
     });
     const series = chart.addCandlestickSeries({
-      upColor: '#16d9b0', downColor: '#ef4966', borderUpColor: '#16d9b0', borderDownColor: '#ef4966',
-      wickUpColor: '#1ce2b9', wickDownColor: '#ff5b75',
+      upColor: '#10d9b0', downColor: '#f25e79',
+      borderUpColor: '#10d9b0', borderDownColor: '#f25e79',
+      wickUpColor: '#10d9b0', wickDownColor: '#f25e79',
     });
     chartRef.current = chart;
     seriesRef.current = series;
-    const ro = new ResizeObserver(() => {
-      if (ref.current) chart.applyOptions({ width: ref.current.clientWidth, height: ref.current.clientHeight });
+    const observer = new ResizeObserver(() => {
+      if (canvasRef.current) chart.applyOptions({ width: canvasRef.current.clientWidth, height: canvasRef.current.clientHeight });
     });
-    ro.observe(ref.current);
-    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; seriesRef.current = null; };
+    observer.observe(canvasRef.current);
+    return () => {
+      observer.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
-    if (!seriesRef.current || !candles.length) return;
-    seriesRef.current.setData(candles as any);
-    chartRef.current?.timeScale().fitContent();
-  }, [candles]);
+    if (!seriesRef.current) return;
+    seriesRef.current.setData(record?.data_available ? candles as any : []);
+    if (candles.length && record?.data_available) chartRef.current?.timeScale().fitContent();
+  }, [candles, record?.data_available]);
 
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
-    for (const line of priceLinesRef.current) { try { series.removePriceLine(line); } catch { /* noop */ } }
+    for (const line of priceLinesRef.current) {
+      try { series.removePriceLine(line); } catch { /* chart may have been recreated */ }
+    }
     priceLinesRef.current = [];
     const signal = record?.signal;
-    if (!signal || signal.status !== 'A_PLUS_SETUP' || !signal.entry || !signal.sl || !signal.tp) return;
+    if (!record?.data_available || signal?.status !== 'A_PLUS_SETUP' ||
+        signal.entry == null || signal.sl == null || signal.tp == null) return;
     priceLinesRef.current = [
-      series.createPriceLine({ price: signal.entry, color: '#2e93ff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'ENTRY' }),
-      series.createPriceLine({ price: signal.sl, color: '#ff5a72', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL' }),
-      series.createPriceLine({ price: signal.tp, color: '#2ae9bd', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP' }),
+      series.createPriceLine({ price: signal.entry, color: '#4d9eff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'ENTRY' }),
+      series.createPriceLine({ price: signal.sl, color: '#f25e79', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'SL' }),
+      series.createPriceLine({ price: signal.tp, color: '#10d9b0', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TP' }),
     ];
   }, [record]);
 
-  if (!record) {
-    return (
-      <div className="vx-panel flex h-full min-h-[380px] items-center justify-center rounded-lg text-[10px] text-[#5f7589]">
-        {t.search}
-      </div>
-    );
-  }
-
-  const risk = riskColor(record.risk?.risk_label || 'LOW');
-  const signal = record.signal;
-  const ready = signal?.status === 'A_PLUS_SETUP';
+  const available = record?.data_available === true;
+  const change = record?.snapshot?.price_change_percent;
+  const positive = typeof change === 'number' && change >= 0;
+  const risk = riskColor(record?.risk?.risk_label || 'LOW');
+  const time = record?.updated_at ? new Date(record.updated_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+  const riskReason = record?.risk?.news_embargo_active ? t.riskOverrideNews :
+    record?.risk?.risk_label === 'HIGH' ? t.riskOverrideHigh : null;
 
   return (
-    <div className="vx-panel flex h-full flex-col rounded-lg">
-      <div className="flex items-center justify-between border-b border-[#15293c] px-3 py-2.5">
-        <div>
-          <div className="vx-mono text-[13px] font-semibold text-white">{record.symbol}</div>
-          <div className="text-[8px] text-[#6f8498]">{record.asset_class} · {record.source}</div>
-        </div>
-        <div className="text-right rtl:text-left">
-          <div className="vx-mono text-[14px] font-semibold text-white">{formatPrice(record.snapshot?.last_price, record.symbol)}</div>
-          <div className={`vx-mono text-[9px] ${(record.snapshot?.price_change_percent ?? 0) >= 0 ? 'text-[#2ae9bd]' : 'text-[#ff5a72]'}`}>
-            {formatPct(record.snapshot?.price_change_percent ?? record.risk?.change_percent_24h)}
+    <section className="vx-panel vx-chart-panel" aria-label={t.activeMarket}>
+      <div className="vx-chart-header">
+        <div className="vx-chart-title">
+          <span className="vx-market-icon"><BarChart3 size={19} /></span>
+          <div>
+            <h2 className="vx-mono">{record?.symbol || '—'}</h2>
+            <span>{record ? record.asset_class + ' · ' + record.source : t.selectSymbol}</span>
           </div>
+        </div>
+        <div className="vx-chart-price">
+          <strong className="vx-mono">{available ? formatPrice(record?.snapshot?.last_price, record?.symbol) : '—'}</strong>
+          <span className={available ? (positive ? 'vx-mint' : 'vx-red') : 'vx-muted'}>{available ? formatPct(change) : t.dataUnavailable}</span>
         </div>
       </div>
-
-      <div className="h-[260px] shrink-0 px-1 pt-1"><div ref={ref} className="h-full w-full" /></div>
-
-      <div className="grid grid-cols-2 gap-2 border-t border-[#15293c] p-3 sm:grid-cols-4">
-        <div className="rounded-md border border-[#15293c] bg-[#081522] p-2">
-          <div className="text-[8px] text-[#71869b]">{t.risk}</div>
-          <div className={`vx-mono mt-1 text-[13px] font-semibold ${risk.text}`}>{record.risk?.risk_score ?? 0}/100</div>
-        </div>
-        <div className="rounded-md border border-[#15293c] bg-[#081522] p-2">
-          <div className="text-[8px] text-[#71869b]">{t.volatility}</div>
-          <div className="mt-1 text-[11px] text-white">{record.risk?.volatility_state || '—'}</div>
-        </div>
-        <div className="rounded-md border border-[#15293c] bg-[#081522] p-2">
-          <div className="text-[8px] text-[#71869b]">{t.session}</div>
-          <div className="mt-1 text-[11px] text-white">{signal?.checklist?.session_name || signal?.session || '—'}</div>
-        </div>
-        <div className="rounded-md border border-[#15293c] bg-[#081522] p-2">
-          <div className="text-[8px] text-[#71869b]">{t.status}</div>
-          <div className="mt-1 text-[11px] text-white">
-            {ready ? t.validated : signal?.status === 'SCANNING' ? t.scanning : t.waitingForData}
-          </div>
-        </div>
+      <div className="vx-chart-toolbar">
+        <span className="vx-toolbar-label"><Activity size={14} />{available ? t.dataHealthy : t.dataUnavailable}</span>
+        <span className="vx-timeframe">15m</span>
+        <span className="vx-toolbar-source">{record?.source || '—'}</span>
+        <span className="vx-toolbar-updated"><Clock3 size={13} />{t.updatedAt} {time}</span>
       </div>
-
-      {ready && (
-        <div className="border-t border-[#15293c] p-3">
-          <div className="flex items-center justify-between">
-            <span className={`text-[16px] font-bold ${signal!.action === 'SELL' ? 'text-[#ff5a72]' : 'text-[#2ae9bd]'}`}>{signal!.action}</span>
-            <span className="vx-mono text-[11px] text-[#8ca1b5]">{t.confluence}: {signal!.confluence_score}/100</span>
+      <div className="vx-chart-stage">
+        <div ref={canvasRef} className="vx-chart-canvas" />
+        {(!available || candles.length === 0) && (
+          <div className="vx-chart-overlay">
+            <span className="vx-chart-empty-icon"><TrendingUp size={25} /></span>
+            <strong>{!available ? t.noMarketData : t.chartUnavailable}</strong>
+            <span>{t.chartUnavailable}</span>
           </div>
-          <div className="mt-2 grid grid-cols-3 gap-2 text-[9px]">
-            <div><div className="text-[#71869b]">{t.entry}</div><div className="vx-mono mt-0.5 text-white">{formatPrice(signal!.entry, record.symbol)}</div></div>
-            <div><div className="text-[#71869b]">{t.stopLoss}</div><div className="vx-mono mt-0.5 text-[#ff5a72]">{formatPrice(signal!.sl, record.symbol)}</div></div>
-            <div><div className="text-[#71869b]">{t.takeProfit}</div><div className="vx-mono mt-0.5 text-[#2ae9bd]">{formatPrice(signal!.tp, record.symbol)}</div></div>
-          </div>
-        </div>
-      )}
-
-      {record.risk?.reasons?.length > 0 && (
-        <div className="border-t border-[#15293c] p-3">
-          <ul className="space-y-1 text-[9px] text-[#9aabba]">
-            {record.risk.reasons.map((reason, i) => <li key={i}>• {reason}</li>)}
-          </ul>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+      <div className="vx-chart-metrics">
+        <div><span>{t.risk}</span><strong className={'vx-mono ' + risk.text}>{available ? (record?.risk?.risk_score ?? '—') + '/100' : '—'}</strong></div>
+        <div><span>{t.volatility}</span><strong>{available ? record?.risk?.volatility_state || '—' : '—'}</strong></div>
+        <div><span>{t.session}</span><strong>{available ? record?.signal?.checklist?.session_name || record?.signal?.session || '—' : '—'}</strong></div>
+        <div><span>{t.status}</span><strong>{available ? record?.signal?.status === 'A_PLUS_SETUP' ? t.validated : t.scanning : t.dataUnavailable}</strong></div>
+      </div>
+      {riskReason && available && <div className="vx-chart-warning"><ShieldAlert size={15} />{riskReason}</div>}
+    </section>
   );
 }
