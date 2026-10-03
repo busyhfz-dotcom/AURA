@@ -109,7 +109,7 @@ class ForexProvider:
         self._last_error: Optional[str] = None
         # Twelve Data's free tier allows 8 requests/minute; leave a safety
         # margin below that so timing jitter doesn't tip us over.
-        self._throttle = _RateLimiter(max_calls=7, period=60.0)
+        self._throttle = _RateLimiter(max_calls=6, period=60.0)
 
     @property
     def configured(self) -> bool:
@@ -137,12 +137,30 @@ class ForexProvider:
             "last_error": self._last_error,
         }
 
-    def _should_attempt(self, attempt_key: tuple[str, ...]) -> bool:
-        """False if this exact request failed within the last cache_seconds —
-        prevents hammering an already-rate-limited or erroring endpoint."""
+    # The Trade Desk analysis loop pulls 15m/1h/4h candles for every symbol on
+    # every analysis cycle (every VERTEX_ANALYSIS_INTERVAL_SECONDS, e.g. 5min),
+    # but a 1h candle is only actually new once an hour and a 4h candle only
+    # once every 4 hours — refetching them that often was most of our real
+    # Twelve Data call volume for no benefit. Cache higher timeframes far
+    # longer than the base cache_seconds; only the fast 15m/scan-loop data
+    # needs to stay near-real-time.
+    _MIN_CACHE_SECONDS = {
+        "1h": 900,     # 15 min
+        "4h": 3600,    # 1 hour
+        "1d": 21600,   # 6 hours
+    }
+
+    def _cache_seconds_for(self, interval: str) -> float:
+        return max(self.cache_seconds, self._MIN_CACHE_SECONDS.get(interval, 0))
+
+    def _should_attempt(self, attempt_key: tuple[str, ...], ttl: Optional[float] = None) -> bool:
+        """False if this exact request failed within the last `ttl` seconds
+        (defaults to cache_seconds) — prevents hammering an already-rate-
+        limited or erroring endpoint."""
+        backoff = self.cache_seconds if ttl is None else ttl
         with self._lock:
             last = self._last_attempt.get(attempt_key)
-        return not (last and time.time() - last < self.cache_seconds)
+        return not (last and time.time() - last < backoff)
 
     def _mark_attempt(self, attempt_key: tuple[str, ...]) -> None:
         with self._lock:
@@ -154,13 +172,14 @@ class ForexProvider:
 
         provider_symbol = _to_provider_symbol(symbol)
         cache_key = (provider_symbol, interval, limit)
+        ttl = self._cache_seconds_for(interval)
         with self._lock:
             cached = self._kline_cache.get(cache_key)
-            if cached and time.time() - cached[0] < self.cache_seconds:
+            if cached and time.time() - cached[0] < ttl:
                 return cached[1].copy()
 
         attempt_key = ("candles",) + cache_key
-        if not self._should_attempt(attempt_key):
+        if not self._should_attempt(attempt_key, ttl):
             # Recently failed (likely 429) — return whatever we have cached
             # rather than firing another doomed request into the same quota.
             with self._lock:
