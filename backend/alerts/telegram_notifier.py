@@ -33,5 +33,6 @@ class TelegramNotifier:
             response.raise_for_status()
             return True
         except Exception as exc:
-            logger.warning("Telegram push failed: %s", exc)
+            error = str(exc).replace(self.bot_token, "***") if self.bot_token else str(exc)
+            logger.warning("Telegram push failed: %s", error)
             return False

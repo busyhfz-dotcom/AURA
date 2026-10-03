@@ -138,8 +138,9 @@ class EconomicCalendarService:
                 self._cached_at = time.time()
                 self._last_error = None
             except Exception as exc:
-                logger.warning("Economic calendar refresh failed: %s", exc)
-                self._last_error = str(exc)
+                error = str(exc).replace(self.api_key, "***") if self.api_key else str(exc)
+                logger.warning("Economic calendar refresh failed: %s", error)
+                self._last_error = error
                 # Back off for cache_seconds even on failure. Without this,
                 # status() is called once per symbol per scan/analysis cycle,
                 # and since _cached_at was never set, every single one of
