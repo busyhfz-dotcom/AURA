@@ -24,7 +24,6 @@ from providers.market_data import MarketDataHub
 
 logger = logging.getLogger("VertexScheduler")
 
-
 class MarketMonitor:
     def __init__(
         self,
@@ -47,11 +46,18 @@ class MarketMonitor:
         self._lock = threading.RLock()
         self._state: dict[str, dict[str, Any]] = {}
         self._analysis: dict[str, dict[str, Any]] = {}
-        self._scan_count = 0
-        self._analysis_count = 0
+        # Crypto and forex are counted (and scheduled — see start()) separately
+        # so a forex slowdown/backoff is visible in /api/health without being
+        # averaged together with crypto's independent, unaffected cadence.
+        self._crypto_scan_count = 0
+        self._forex_scan_count = 0
+        self._crypto_analysis_count = 0
+        self._forex_analysis_count = 0
         self._started_at = time.time()
-        self._scan_task: asyncio.Task | None = None
-        self._analysis_task: asyncio.Task | None = None
+        self._crypto_scan_task: asyncio.Task | None = None
+        self._forex_scan_task: asyncio.Task | None = None
+        self._crypto_analysis_task: asyncio.Task | None = None
+        self._forex_analysis_task: asyncio.Task | None = None
 
     def latest(self, symbol: str) -> dict[str, Any] | None:
         with self._lock:
@@ -75,11 +81,16 @@ class MarketMonitor:
         return time.time() - self._started_at
 
     def scan_count(self) -> int:
-        return self._scan_count
+        return self._crypto_scan_count + self._forex_scan_count
 
     def analysis_count(self) -> int:
-        return self._analysis_count
+        return self._crypto_analysis_count + self._forex_analysis_count
 
+    def scan_counts_by_class(self) -> dict[str, int]:
+        return {"crypto": self._crypto_scan_count, "forex": self._forex_scan_count}
+
+    def analysis_counts_by_class(self) -> dict[str, int]:
+        return {"crypto": self._crypto_analysis_count, "forex": self._forex_analysis_count}
     def _scan_symbol(self, symbol: str) -> dict[str, Any] | None:
         try:
             # limit=220 matches _analyze_symbol's 15m request below so the two
@@ -133,16 +144,26 @@ class MarketMonitor:
         except Exception as exc:
             logger.exception("Scan failed for %s: %s", symbol, exc)
             return None
-
-    async def _run_loop(self, store) -> None:
-        interval = self.settings.scan_interval_seconds
-        logger.info("Vertex market monitor starting; watching %d symbols every %ss", len(self.market_data.watchlist), interval)
+    async def _run_scan_loop(self, store, symbols: list[str], interval: float, label: str) -> None:
+        # Crypto and forex each get their OWN loop/interval/task instead of
+        # sharing one — previously both asset classes were scanned inside a
+        # single sequential loop, so a slow or throttled Twelve Data call
+        # (forex) delayed how soon the *next* cycle started, which meant
+        # crypto's scan cadence could drift even though Binance itself never
+        # had a problem. Running them as independent asyncio tasks means a
+        # forex rate-limit backoff can never slow down crypto, and vice versa.
+        if not symbols:
+            return
+        logger.info("Vertex %s scan starting; watching %d symbols every %ss", label, len(symbols), interval)
         while True:
-            for symbol in self.market_data.watchlist:
+            for symbol in symbols:
                 record = await asyncio.to_thread(self._scan_symbol, symbol)
                 if record and record["data_available"]:
                     store.add_risk_snapshot(record["risk"])
-            self._scan_count += 1
+            if label == "crypto":
+                self._crypto_scan_count += 1
+            else:
+                self._forex_scan_count += 1
             await asyncio.sleep(interval)
 
     def _analyze_symbol(self, symbol: str) -> dict[str, Any] | None:
@@ -171,26 +192,50 @@ class MarketMonitor:
         except Exception as exc:
             logger.exception("Trade analysis failed for %s: %s", symbol, exc)
             return None
-
-    async def _run_analysis_loop(self) -> None:
-        interval = self.settings.analysis_interval_seconds
-        logger.info("Vertex trade analyst starting; deep-analyzing %d symbols every %ss", len(self.market_data.watchlist), interval)
+    async def _run_analysis_loop(self, symbols: list[str], interval: float, label: str) -> None:
+        if not symbols:
+            return
+        logger.info("Vertex %s trade analyst starting; deep-analyzing %d symbols every %ss", label, len(symbols), interval)
         while True:
-            for symbol in self.market_data.watchlist:
+            for symbol in symbols:
                 await asyncio.to_thread(self._analyze_symbol, symbol)
-            self._analysis_count += 1
+            if label == "crypto":
+                self._crypto_analysis_count += 1
+            else:
+                self._forex_analysis_count += 1
             await asyncio.sleep(interval)
 
     def start(self, store) -> None:
         loop = asyncio.get_event_loop()
-        if self._scan_task is None:
-            self._scan_task = loop.create_task(self._run_loop(store))
-        if self._analysis_task is None:
-            self._analysis_task = loop.create_task(self._run_analysis_loop())
+        crypto_symbols = list(self.settings.crypto_watchlist)
+        forex_symbols = list(self.settings.forex_watchlist)
+        if self._crypto_scan_task is None:
+            self._crypto_scan_task = loop.create_task(
+                self._run_scan_loop(store, crypto_symbols, self.settings.scan_interval_seconds, "crypto")
+            )
+        if self._forex_scan_task is None:
+            self._forex_scan_task = loop.create_task(
+                self._run_scan_loop(store, forex_symbols, self.settings.scan_interval_seconds, "forex")
+            )
+        if self._crypto_analysis_task is None:
+            self._crypto_analysis_task = loop.create_task(
+                self._run_analysis_loop(crypto_symbols, self.settings.analysis_interval_seconds, "crypto")
+            )
+        if self._forex_analysis_task is None:
+            self._forex_analysis_task = loop.create_task(
+                self._run_analysis_loop(forex_symbols, self.settings.analysis_interval_seconds, "forex")
+            )
 
     def stop(self) -> None:
-        for task in (self._scan_task, self._analysis_task):
+        for task in (
+            self._crypto_scan_task,
+            self._forex_scan_task,
+            self._crypto_analysis_task,
+            self._forex_analysis_task,
+        ):
             if task is not None:
                 task.cancel()
-        self._scan_task = None
-        self._analysis_task = None
+        self._crypto_scan_task = None
+        self._forex_scan_task = None
+        self._crypto_analysis_task = None
+        self._forex_analysis_task = None
