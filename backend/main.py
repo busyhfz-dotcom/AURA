@@ -71,6 +71,12 @@ async def health_check():
         "version": "1.0.0",
         "uptime_seconds": round(monitor.uptime_seconds(), 1),
         "scan_count": monitor.scan_count(),
+        # Crypto and forex now run on fully independent scheduler loops (see
+        # scheduler.py), so a forex rate-limit backoff can never slow down
+        # crypto's cadence. This breakdown makes that independence visible:
+        # crypto's count should keep climbing steadily even while forex's
+        # count stalls (e.g. during a Twelve Data daily-quota exhaustion).
+        "scan_counts_by_class": monitor.scan_counts_by_class(),
         "scan_interval_seconds": settings.scan_interval_seconds,
         "data_status": market_data.data_status(),
         "news_guard": calendar_service.status(),
