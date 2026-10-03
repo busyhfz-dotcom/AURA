@@ -32,6 +32,7 @@ a hard requirement.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -61,6 +62,15 @@ def _to_provider_symbol(symbol: str) -> str:
     if symbol == "XAGUSD":
         return "XAG/USD"
     return symbol
+
+def _redact(text: Optional[str]) -> Optional[str]:
+    """Strip the API key from provider error text (requests embeds the full
+    URL, including ?apikey=..., in its exception messages) so it never reaches
+    the public /api/health response."""
+    if text is None:
+        return None
+    return re.sub(r"(apikey=)[^&\s'\"]+", r"\1***", text, flags=re.IGNORECASE)
+
 
 
 class _RateLimiter:
@@ -121,7 +131,7 @@ class ForexProvider:
 
     @property
     def last_error(self) -> Optional[str]:
-        return self._last_error
+        return _redact(self._last_error)
 
     def status(self) -> dict[str, Any]:
         if not self.configured:
@@ -134,7 +144,7 @@ class ForexProvider:
             "configured": True,
             "provider": self.provider,
             "healthy": self._last_error is None,
-            "last_error": self._last_error,
+            "last_error": self.last_error,
         }
 
     # The Trade Desk analysis loop pulls 15m/1h/4h candles for every symbol on
